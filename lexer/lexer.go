@@ -75,8 +75,7 @@ func (l *Lexer) peekChar() rune {
 }
 
 func (l *Lexer) NextToken() token.Token {
-	l.skipWhitespace()
-	l.skipComments()
+	l.skipWhitespaceAndComments()
 
 	tok := token.Token{Line: l.line, Col: l.col}
 
@@ -210,6 +209,19 @@ func (l *Lexer) NextToken() token.Token {
 	return tok
 }
 
+func (l *Lexer) skipWhitespaceAndComments() {
+	for {
+		l.skipWhitespace()
+		if l.ch == '/' && l.peekChar() == '/' {
+			for l.ch != '\n' && l.ch != 0 {
+				l.readChar()
+			}
+			continue
+		}
+		break
+	}
+}
+
 func (l *Lexer) skipWhitespace() {
 	for isWhitespace(l.ch) {
 		if l.ch == '\n' {
@@ -218,14 +230,6 @@ func (l *Lexer) skipWhitespace() {
 		}
 
 		l.readChar()
-	}
-}
-
-func (l *Lexer) skipComments() {
-	if l.ch == '/' && l.peekChar() == '/' {
-		for l.ch != '\n' && l.ch != 0 {
-			l.readChar()
-		}
 	}
 }
 

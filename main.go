@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/hilthontt/lotus/lexer"
+	"github.com/hilthontt/lotus/parser"
 	"github.com/hilthontt/lotus/version"
 )
 
@@ -30,10 +31,12 @@ func main() {
 	}
 
 	input := string(data)
-	tokens := lexer.Tokenize(input)
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
 
-	for _, t := range tokens {
-		fmt.Println(t.String())
+	for _, stmt := range program.Statements {
+		fmt.Printf("%v\n", stmt)
 	}
 }
 
