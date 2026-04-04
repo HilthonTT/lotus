@@ -235,19 +235,15 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.breakPos = c.breakPos[:len(c.breakPos)-1]
 
 	case *ast.ForStatement:
-		// Compile iterable, then use OpGetLocal index + manual iteration via built-in
-		// Simplification: for x in arr → compile arr, get len, iterate with counter
 		iterSym := c.symbolTable.Define("__iter__", true)
 		counterSym := c.symbolTable.Define("__counter__", true)
 		elemSym := c.symbolTable.Define(node.Variable.Value, true)
 
-		// __iter__ = <iterable>
 		if err := c.Compile(node.Iterable); err != nil {
 			return err
 		}
 		c.setSymbol(iterSym)
 
-		// __counter__ = 0
 		c.emit(code.OpConstant, c.addConstant(&object.Integer{Value: 0}))
 		c.setSymbol(counterSym)
 
@@ -255,33 +251,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.loopStarts = append(c.loopStarts, loopStart)
 		c.breakPos = append(c.breakPos, []int{})
 
-		// condition: __counter__ < len(__iter__)
-		// We need: len(__iter__) > __counter__
-		// Push len builtin, call with __iter__, then push counter, then OpGreater
 		c.emit(code.OpGetBuiltin, builtinIndex("len"))
 		c.loadSymbol(iterSym)
 		c.emit(code.OpCall, 1)
 		c.loadSymbol(counterSym)
-		// stack: len_result, counter => OpGreater checks left > right
 		c.emit(code.OpGreater)
 
 		exitPos := c.emit(code.OpJumpFalse, 9999)
 
-		// elem = __iter__[__counter__]
 		c.loadSymbol(iterSym)
 		c.loadSymbol(counterSym)
 		c.emit(code.OpIndex)
-		c.loadSymbol(elemSym)
+		c.setSymbol(elemSym) // was loadSymbol → STORE, not load
 
 		if err := c.Compile(node.Body); err != nil {
 			return err
 		}
 
-		// __counter__ = __counter__ + 1
 		c.loadSymbol(counterSym)
 		c.emit(code.OpConstant, c.addConstant(&object.Integer{Value: 1}))
 		c.emit(code.OpAdd)
-		c.loadSymbol(counterSym)
+		c.setSymbol(counterSym) // was loadSymbol → STORE, not load
 
 		c.emitLoop(loopStart)
 		afterLoop := len(c.currentInstructions())
@@ -345,41 +335,40 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.InfixExpression:
-		if node.Operator == "<" || node.Operator == "<=" {
+		// Handle < and <= by swapping operands
+		if node.Operator == "<" {
 			if err := c.Compile(node.Right); err != nil {
 				return err
 			}
-
 			if err := c.Compile(node.Left); err != nil {
 				return err
 			}
-
-			if node.Operator == "<" {
-				c.emit(code.OpGreater)
-			} else {
-				c.emit(code.OpGreaterEq)
+			c.emit(code.OpGreater)
+			return nil
+		}
+		if node.Operator == "<=" {
+			if err := c.Compile(node.Right); err != nil {
+				return err
 			}
+			if err := c.Compile(node.Left); err != nil {
+				return err
+			}
+			c.emit(code.OpGreaterEq)
 			return nil
 		}
 
-		if err := c.Compile(node.Right); err != nil {
-			return err
-		}
-
+		// Left first for everything else
 		if err := c.Compile(node.Left); err != nil {
 			return err
 		}
 
-		// Short-circuit && and ||
+		// Short-circuit &&
 		if node.Operator == "&&" {
-			// left is on stack, OpJumpFalse pops it
 			falseJump := c.emit(code.OpJumpFalse, 9999)
-			// Left was truthy → evaluate right (its value is the result)
 			if err := c.Compile(node.Right); err != nil {
 				return err
 			}
 			endJump := c.emit(code.OpJump, 9999)
-			// Left was falsy → result is false
 			falsePos := len(c.currentInstructions())
 			c.replaceOperand(falseJump, falsePos)
 			c.emit(code.OpFalse)
@@ -387,13 +376,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.replaceOperand(endJump, endPos)
 			return nil
 		}
+
+		// Short-circuit ||
 		if node.Operator == "||" {
-			// left is on stack, OpJumpFalse pops it
 			falseJump := c.emit(code.OpJumpFalse, 9999)
-			// Left was truthy → result is true
 			c.emit(code.OpTrue)
 			endJump := c.emit(code.OpJump, 9999)
-			// Left was falsy → evaluate right (its value is the result)
 			falsePos := len(c.currentInstructions())
 			c.replaceOperand(falseJump, falsePos)
 			if err := c.Compile(node.Right); err != nil {
@@ -404,6 +392,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return nil
 		}
 
+		// Right, then emit the operator
 		if err := c.Compile(node.Right); err != nil {
 			return err
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
 // Instructions - Type alias for a slice of byte.
@@ -189,7 +190,7 @@ func Make(op Opcode, operands ...int) []byte {
 		width := def.OperandWidths[i]
 		switch width {
 		case 2:
-			binary.BigEndian.PutUint16(instruction[offset:1], uint16(o))
+			binary.BigEndian.PutUint16(instruction[offset:], uint16(o))
 		case 1:
 			instruction[offset] = byte(o)
 		}
@@ -225,4 +226,28 @@ func ReadUint16(ins Instructions) uint16 {
 // ReadUint8 turns a byte sequence (Instructions) into a uint16
 func ReadUint8(ins Instructions) uint8 {
 	return uint8(ins[0])
+}
+
+func Disassemble(ins Instructions) string {
+	var out strings.Builder
+
+	i := 0
+	for i < len(ins) {
+		def, err := Lookup(ins[i])
+		if err != nil {
+			fmt.Fprintf(&out, "%04d ERROR: %s\n", i, err)
+			i++
+			continue
+		}
+
+		operands, read := ReadOperands(def, ins[i+1:])
+		fmt.Fprintf(&out, "%04d %s", i, def.Name)
+		for _, o := range operands {
+			fmt.Fprintf(&out, " %d", o)
+		}
+		out.WriteString("\n")
+		i += 1 + read
+	}
+
+	return out.String()
 }
