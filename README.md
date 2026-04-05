@@ -22,18 +22,21 @@ Source → Lexer → Parser → Compiler → Bytecode → VM → Result
                                     Closures
 ```
 
-| Component    | Package      | Description                                          |
-|--------------|--------------|------------------------------------------------------|
-| Token        | `token/`     | 40+ token types — keywords, operators, delimiters    |
-| Lexer        | `lexer/`     | UTF-8 scanner with escape sequences and `//` comments|
-| AST          | `ast/`       | 20+ node types for statements and expressions        |
-| Parser       | `parser/`    | Pratt parser with 10 precedence levels               |
-| Symbol Table | `compiler/`  | Scoped resolution with free variable capture         |
-| Compiler     | `compiler/`  | Single-pass bytecode emitter                         |
-| Opcodes      | `code/`      | Bytecode encoding/decoding with disassembler         |
-| VM           | `vm/`        | Stack-based VM with call frames and closures         |
-| Object       | `object/`    | Runtime value types with method dispatch             |
-| Builtins     | `compiler/`  | Built-in functions                                   |
+| Component    | Package      | Description                                           |
+| ------------ | ------------ | ----------------------------------------------------- |
+| Token        | `token/`     | 40+ token types — keywords, operators, delimiters     |
+| Lexer        | `lexer/`     | UTF-8 scanner with escape sequences and `//` comments |
+| AST          | `ast/`       | 20+ node types for statements and expressions         |
+| Parser       | `parser/`    | Pratt parser with 10 precedence levels                |
+| Symbol Table | `compiler/`  | Scoped resolution with free variable capture          |
+| Compiler     | `compiler/`  | Single-pass bytecode emitter                          |
+| Opcodes      | `code/`      | Bytecode encoding/decoding with disassembler          |
+| VM           | `vm/`        | Stack-based VM with call frames and closures          |
+| Object       | `object/`    | Runtime value types with method dispatch              |
+| Builtins     | `compiler/`  | Built-in functions shared by compiler and evaluator   |
+| Evaluator    | `evaluator/` | Tree-walking interpreter (alternative execution mode) |
+| REPL         | `repl/`      | Interactive read-eval-print loop                      |
+| Version      | `version/`   | Build metadata (version, commit, build time)          |
 
 ## Quick Start
 
@@ -41,14 +44,23 @@ Source → Lexer → Parser → Compiler → Bytecode → VM → Result
 # Build
 go build -o lotus .
 
-# Run a file
-./lotus run examples/showcase.lotus
+# Run a file (VM engine, default)
+./lotus examples/showcase.lotus
 
-# Start the REPL
-./lotus
+# Run a file with the tree-walking evaluator
+./lotus --engine eval examples/showcase.lotus
 
-# Disassemble (show bytecode)
-./lotus dis examples/showcase.lotus
+# Start the interactive REPL (VM engine, default)
+./lotus --console
+
+# Start the REPL with the evaluator
+./lotus --console --engine eval
+
+# Print version info
+./lotus --version
+
+# Show help
+./lotus --help
 
 # Run tests
 go test -v ./...
@@ -64,19 +76,19 @@ mut counter = 0          // mutable binding
 counter = counter + 1    // reassignment (mut only)
 ```
 
-Attempting to reassign a `let` binding is a compile-time error.
+Attempting to reassign a `let` binding is a runtime error.
 
 ### Types
 
-| Type    | Examples                         |
-|---------|----------------------------------|
-| Integer | `42`, `-7`, `0`                  |
-| Float   | `3.14`, `0.5`                    |
-| String  | `"hello"`, `"line\nnewline"`     |
-| Boolean | `true`, `false`                  |
-| Nil     | `nil`                            |
-| Array   | `[1, 2, 3]`, `["a", true, nil]`  |
-| Map     | `{"key": "value", "n": 42}`      |
+| Type    | Examples                        |
+| ------- | ------------------------------- |
+| Integer | `42`, `-7`, `0`                 |
+| Float   | `3.14`, `0.5`                   |
+| String  | `"hello"`, `"line\nnewline"`    |
+| Boolean | `true`, `false`                 |
+| Nil     | `nil`                           |
+| Array   | `[1, 2, 3]`, `["a", true, nil]` |
+| Map     | `{"key": "value", "n": 42}`     |
 
 ### Operators
 
@@ -168,7 +180,7 @@ m["name"]  // "Alice"
 
 "hello"[1] // "e"
 
-// Index assignment (mut arrays and maps)
+// Index assignment (mut arrays and maps only)
 mut nums = [1, 2, 3]
 nums[0] = 99
 ```
@@ -190,18 +202,18 @@ m.values()      // [1, 2]
 
 ### Built-in Functions
 
-| Function      | Description                                       |
-|---------------|---------------------------------------------------|
-| `print(...)`  | Print values separated by spaces                  |
-| `len(x)`      | Length of string, array, or map                   |
-| `push(a, v)`  | Return new array with value appended              |
-| `pop(a)`      | Return last element of array                      |
-| `head(a)`     | Return first element of array                     |
-| `tail(a)`     | Return array without first element                |
-| `type(x)`     | Return type name as string                        |
-| `str(x)`      | Convert value to string                           |
-| `int(x)`      | Convert value to integer                          |
-| `range(...)`  | Generate integer array — `range(n)`, `range(start, end)`, `range(start, end, step)` |
+| Function     | Description                                                                        |
+| ------------ | ---------------------------------------------------------------------------------- |
+| `print(...)` | Print values separated by spaces                                                   |
+| `len(x)`     | Length of string, array, or map                                                    |
+| `push(a, v)` | Return new array with value appended                                               |
+| `pop(a)`     | Return last element of array                                                       |
+| `head(a)`    | Return first element of array                                                      |
+| `tail(a)`    | Return array without first element                                                 |
+| `type(x)`    | Return type name as string                                                         |
+| `str(x)`     | Convert value to string                                                            |
+| `int(x)`     | Convert value to integer                                                           |
+| `range(...)` | Generate integer array: `range(n)`, `range(start, end)`, `range(start, end, step)` |
 
 ### Comments
 
@@ -244,6 +256,17 @@ print("Sorted:", str(quicksort(unsorted)))
 // => Sorted: [3, 9, 10, 27, 38, 43, 82]
 ```
 
+## Execution Engines
+
+Lotus supports two execution modes, selectable via `--engine`:
+
+| Engine | Flag            | Description                                                       |
+| ------ | --------------- | ----------------------------------------------------------------- |
+| VM     | `--engine vm`   | Compiles to bytecode and executes on the stack-based VM (default) |
+| Eval   | `--engine eval` | Tree-walking interpreter — simpler, no compilation step           |
+
+Both engines share the same lexer, parser, and built-in functions. The VM engine is faster and is the default for file execution and the REPL.
+
 ## Bytecode & VM
 
 Lotus compiles to a custom bytecode with 30+ opcodes executed by a stack-based virtual machine.
@@ -251,17 +274,15 @@ Lotus compiles to a custom bytecode with 30+ opcodes executed by a stack-based v
 **Disassembly example:**
 
 ```
-$ echo 'let x = 1 + 2; print(str(x))' | ./lotus dis /dev/stdin
-
 0000 OpConstant 0        // push 1
 0003 OpConstant 1        // push 2
-0006 OpAdd                // 1 + 2 = 3
+0006 OpAdd               // 1 + 2 = 3
 0007 OpSetGlobal 0       // x = 3
 0010 OpGetBuiltin 0      // push print
 0012 OpGetBuiltin 7      // push str
 0014 OpGetGlobal 0       // push x
-0017 OpCall 1             // str(x)
-0019 OpCall 1             // print("3")
+0017 OpCall 1            // str(x)
+0019 OpCall 1            // print("3")
 0021 OpPop
 ```
 
