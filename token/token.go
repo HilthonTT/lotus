@@ -27,13 +27,15 @@ const (
 	STRING TokenType = "STRING"
 
 	// Operators
-	ASSIGN   TokenType = "="
-	PLUS     TokenType = "+"
-	MINUS    TokenType = "-"
-	BANG     TokenType = "!"
-	ASTERISK TokenType = "*"
-	SLASH    TokenType = "/"
-	MODULO   TokenType = "%"
+	ASSIGN     TokenType = "="
+	PLUS       TokenType = "+"
+	PLUSPLUS   TokenType = "++"
+	MINUS      TokenType = "-"
+	MINUSMINUS TokenType = "--"
+	BANG       TokenType = "!"
+	ASTERISK   TokenType = "*"
+	SLASH      TokenType = "/"
+	MODULO     TokenType = "%"
 
 	LT    TokenType = "<"
 	GT    TokenType = ">"

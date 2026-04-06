@@ -90,11 +90,26 @@ func (l *Lexer) NextToken() token.Token {
 			tok.Literal = "="
 		}
 	case '+':
-		tok.Type = token.PLUS
-		tok.Literal = "+"
+		if l.peekChar() == '+' {
+			ch := l.ch
+			l.readChar()
+			tok.Type = token.PLUSPLUS
+			tok.Literal = string(ch) + string(l.ch)
+		} else {
+			tok.Type = token.PLUS
+			tok.Literal = "+"
+		}
 	case '-':
-		tok.Type = token.MINUS
-		tok.Literal = "-"
+		if l.peekChar() == '-' {
+			ch := l.ch
+			l.readChar()
+			tok.Type = token.MINUSMINUS
+			tok.Literal = string(ch) + string(l.ch)
+
+		} else {
+			tok.Type = token.MINUS
+			tok.Literal = "-"
+		}
 	case '!':
 		if l.peekChar() == '=' {
 			tok.Type = token.NOTEQ

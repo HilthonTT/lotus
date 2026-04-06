@@ -141,6 +141,11 @@ func (vm *VM) Run() error {
 				return err
 			}
 
+		case code.OpPlusPlus, code.OpMinusMinus:
+			if err := vm.executePostfixOperator(op); err != nil {
+				return err
+			}
+
 		// --- Comparison ---
 
 		case code.OpEqual, code.OpNotEqual, code.OpGreater, code.OpGreaterEq:
@@ -498,6 +503,22 @@ func (vm *VM) executeNegateOperator() error {
 func (vm *VM) executeNotOperator() error {
 	operand := vm.pop()
 	return vm.push(nativeBoolToBooleanObj(!isTruthy(operand)))
+}
+
+func (vm *VM) executePostfixOperator(op code.Opcode) error {
+	operand := vm.pop()
+	if operand.Type() != object.INTEGER_OBJ {
+		return fmt.Errorf("postfix operator requires integer, got %s", operand.Type())
+	}
+
+	val := operand.(*object.Integer).Value
+	if op == code.OpPlusPlus {
+		val++
+	} else {
+		val--
+	}
+
+	return vm.push(&object.Integer{Value: val})
 }
 
 // --- Index operations ---

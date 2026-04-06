@@ -140,6 +140,10 @@ const (
 	OpMod
 	OpNegate // Unary minus
 
+	// Postfix/unary
+	OpPlusPlus
+	OpMinusMinus
+
 	// Comparison
 	OpEqual
 	OpNotEqual
@@ -224,6 +228,8 @@ var definitions = map[Opcode]*Definition{
 	OpLoop:       {"OpLoop", []int{2}},
 	OpConcat:     {"OpConcat", []int{}},
 	OpSetFree:    {"OpSetFree", []int{1}},
+	OpMinusMinus: {"OpMinusMinus", []int{}},
+	OpPlusPlus:   {"OpPlusPlus", []int{}},
 }
 
 // Lookup finds the Definition for a given opcode byte.

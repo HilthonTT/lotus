@@ -65,3 +65,53 @@ print("Language:", name)
 
 	fmt.Println("\n=== Test completed. Check above for any errors ===")
 }
+
+func TestPostfix(t *testing.T) {
+	input := `
+mut number = 1
+number++
+`
+
+	tests := []struct {
+		expectedType    token.TokenType
+		expectedLiteral string
+		expectedLine    int
+	}{
+		{token.MUT, "mut", 2},
+		{token.IDENT, "number", 2},
+		{token.ASSIGN, "=", 2},
+		{token.INT, "1", 2},
+		{token.IDENT, "number", 3},
+		{token.PLUSPLUS, "++", 3},
+	}
+
+	l := New(input)
+
+	for i, tt := range tests {
+		tok := l.NextToken()
+
+		// Debug Output
+		fmt.Printf("tests[%2d] Line:%2d  %-10s  %q\n",
+			i, tok.Line, tok.Type, tok.Literal)
+
+		// Check token type
+		if tok.Type != tt.expectedType {
+			t.Errorf("tests[%d] - TOKEN TYPE wrong\n   Expected: %q\n   Got:      %q\n   Literal:  %q\n",
+				i, tt.expectedType, tok.Type, tok.Literal)
+		}
+
+		// Check literal
+		if tok.Literal != tt.expectedLiteral {
+			t.Errorf("tests[%d] - LITERAL wrong\n   Expected: %q\n   Got:      %q\n   Type:     %q\n",
+				i, tt.expectedLiteral, tok.Literal, tok.Type)
+		}
+
+		// Check line number
+		if tok.Line != tt.expectedLine {
+			t.Errorf("tests[%d] - LINE wrong\n   Expected: %d\n   Got:      %d\n   Token:    %s %q\n",
+				i, tt.expectedLine, tok.Line, tok.Type, tok.Literal)
+		}
+	}
+
+	fmt.Println("\n=== Test completed. Check above for any errors ===")
+}

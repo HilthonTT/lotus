@@ -334,6 +334,44 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return fmt.Errorf("unknown prefix operator: %s", node.Operator)
 		}
 
+	case *ast.PostfixExpression:
+		symbol, ok := c.symbolTable.Resolve(node.TokenLiteral())
+		if !ok {
+			return fmt.Errorf("undefined variable %s", node.TokenLiteral())
+		}
+		if !symbol.Mutable {
+			return fmt.Errorf("cannot assign to immutable variable: %s", node.TokenLiteral())
+		}
+
+		// Load -> mutate -> store -> reload
+		// The reload is required because ExpressionStatement always emits OpPop.
+		// It also makes postfix usable as a sub-expression: let y = x++
+		if symbol.Scope == GlobalScope {
+			c.emit(code.OpGetGlobal, symbol.Index)
+			switch node.Operator {
+			case "++":
+				c.emit(code.OpPlusPlus)
+			case "--":
+				c.emit(code.OpMinusMinus)
+			default:
+				return fmt.Errorf("unknown operator %s", node.Operator)
+			}
+			c.emit(code.OpSetGlobal, symbol.Index)
+			c.emit(code.OpGetGlobal, symbol.Index) // keep a value on the stack for OpPop
+		} else {
+			c.emit(code.OpGetLocal, symbol.Index)
+			switch node.Operator {
+			case "++":
+				c.emit(code.OpPlusPlus)
+			case "--":
+				c.emit(code.OpMinusMinus)
+			default:
+				return fmt.Errorf("unknown operator %s", node.Operator)
+			}
+			c.emit(code.OpSetLocal, symbol.Index)
+			c.emit(code.OpGetLocal, symbol.Index) // same for locals
+		}
+
 	case *ast.InfixExpression:
 		// Handle < and <= by swapping operands
 		if node.Operator == "<" {
