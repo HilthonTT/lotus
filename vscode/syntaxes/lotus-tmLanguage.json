@@ -1,0 +1,183 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Lotus",
+  "scopeName": "source.lotus",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#import-statement" },
+    { "include": "#export-keyword" },
+    { "include": "#numbers" },
+    { "include": "#constants" },
+    { "include": "#keywords-control" },
+    { "include": "#keywords-declaration" },
+    { "include": "#class-declaration" },
+    { "include": "#function-declaration" },
+    { "include": "#self-super" },
+    { "include": "#packages" },
+    { "include": "#class-instantiation" },
+    { "include": "#function-call" },
+    { "include": "#operators" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.double-slash.lotus",
+      "match": "//.*$"
+    },
+
+    "strings": {
+      "name": "string.quoted.double.lotus",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.lotus",
+          "match": "\\\\[ntr\\\\\"']"
+        }
+      ]
+    },
+
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.lotus",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.lotus",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+
+    "constants": {
+      "name": "constant.language.lotus",
+      "match": "\\b(true|false|nil)\\b"
+    },
+
+    "import-statement": {
+      "comment": "import { add, Foo } from \"path\"",
+      "begin": "\\b(import)\\s*(\\{)",
+      "end": "\\}\\s*(from)\\s*(\"[^\"]*\")",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.import.lotus" },
+        "2": { "name": "punctuation.definition.block.lotus" }
+      },
+      "endCaptures": {
+        "1": { "name": "keyword.control.from.lotus" },
+        "2": { "name": "string.quoted.double.lotus" }
+      },
+      "patterns": [
+        {
+          "name": "entity.name.type.lotus",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.import.lotus",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "punctuation.separator.lotus",
+          "match": ","
+        }
+      ]
+    },
+
+    "export-keyword": {
+      "name": "keyword.control.export.lotus",
+      "match": "\\bexport\\b"
+    },
+
+    "keywords-control": {
+      "name": "keyword.control.lotus",
+      "match": "\\b(if|else|while|for|in|break|continue|return)\\b"
+    },
+
+    "keywords-declaration": {
+      "name": "keyword.declaration.lotus",
+      "match": "\\b(let|mut|fn|extends)\\b"
+    },
+
+    "class-declaration": {
+      "match": "\\b(class)\\s+([A-Z][a-zA-Z0-9_]*)(?:\\s+(extends)\\s+([A-Z][a-zA-Z0-9_]*))?",
+      "captures": {
+        "1": { "name": "keyword.declaration.lotus" },
+        "2": { "name": "entity.name.type.class.lotus" },
+        "3": { "name": "keyword.declaration.lotus" },
+        "4": { "name": "entity.name.type.class.lotus" }
+      }
+    },
+
+    "function-declaration": {
+      "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "keyword.declaration.lotus" },
+        "2": { "name": "entity.name.function.lotus" }
+      }
+    },
+
+    "self-super": {
+      "name": "variable.language.lotus",
+      "match": "\\b(self|super)\\b"
+    },
+
+    "packages": {
+      "name": "support.class.lotus",
+      "match": "\\b(Console|Math|OS)\\b(?=\\.)"
+    },
+
+    "class-instantiation": {
+      "comment": "Foo(...) — uppercase call is a class constructor",
+      "match": "\\b([A-Z][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.type.lotus" }
+      }
+    },
+
+    "function-call": {
+      "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.call.lotus" }
+      }
+    },
+
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.lotus",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.lotus",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.lotus",
+          "match": "(\\+\\+|--|\\+|-|\\*|/|%)"
+        },
+        {
+          "name": "keyword.operator.ternary.lotus",
+          "match": "\\?"
+        },
+        {
+          "name": "keyword.operator.assignment.lotus",
+          "match": "(?<![=!<>])=(?!=)"
+        }
+      ]
+    },
+
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.type.lotus",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.lotus",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}
