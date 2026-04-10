@@ -10,6 +10,7 @@ type Closure struct {
 	Fn            *CompiledFunction
 	Free          []Object // captured variables
 	DefiningClass *Class   // non-nil when this closure is a class method
+	Constants     []Object // constants pool this closure was compiled against
 }
 
 func (o *Closure) Type() ObjectType {

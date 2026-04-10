@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/hilthontt/lotus/ast"
 	"github.com/hilthontt/lotus/code"
@@ -68,9 +69,11 @@ func validateEngine(engine string) error {
 func runFile(filePath, engine string) {
 	program := mustParse(filePath)
 
+	absPath, _ := filepath.Abs(filePath)
+
 	var result object.Object
 	if engine == "vm" {
-		result = compileBytecodeAndRun(program)
+		result = compileBytecodeAndRun(program, absPath)
 	} else {
 		result = evaluateAst(program)
 	}
@@ -119,6 +122,7 @@ func disassembleFile(filePath string, annotated bool) {
 }
 
 func mustParse(filePath string) *ast.Program {
+	fmt.Println(filePath)
 	contents, err := os.ReadFile(filePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: could not read file %q: %s\n", filePath, err)
@@ -142,20 +146,68 @@ func evaluateAst(program *ast.Program) object.Object {
 	return evaluator.Eval(program, env)
 }
 
-func compileBytecodeAndRun(program *ast.Program) object.Object {
+func compileBytecodeAndRun(program *ast.Program, filePath string) object.Object {
 	comp := compiler.New()
 	if err := comp.Compile(program); err != nil {
 		fmt.Fprintf(os.Stderr, "compiler error: %s\n", err)
 		os.Exit(1)
 	}
 
-	machine := vm.New(comp.Bytecode())
+	absPath, _ := filepath.Abs(filePath)
+	loader := makeModuleLoaderFrom(absPath)
+	machine := vm.NewWithLoader(comp.Bytecode(), loader)
 	if err := machine.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "vm error: %s\n", err)
 		os.Exit(1)
 	}
 
 	return machine.LastPoppedStackElement()
+}
+
+func makeModuleLoaderFrom(entryPath string) vm.ModuleLoader {
+	cache := map[string]*object.Module{}
+
+	var load func(importerPath, path string) (*object.Module, error)
+	load = func(importerPath, path string) (*object.Module, error) {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(importerPath), path)
+		}
+		path = filepath.Clean(path)
+
+		if mod, ok := cache[path]; ok {
+			return mod, nil
+		}
+
+		program := mustParse(path)
+
+		comp := compiler.New()
+		if err := comp.Compile(program); err != nil {
+			return nil, fmt.Errorf("compile error in %q: %w", path, err)
+		}
+
+		bytecode := comp.Bytecode()
+		machine := vm.NewWithLoader(bytecode, func(childPath string) (*object.Module, error) {
+			return load(path, childPath)
+		})
+		if err := machine.Run(); err != nil {
+			return nil, fmt.Errorf("runtime error in %q: %w", path, err)
+		}
+
+		mod := &object.Module{
+			Path:    path,
+			Exports: make(map[string]object.Object),
+		}
+		for name, globalIdx := range bytecode.ExportedSymbols {
+			mod.Exports[name] = machine.GetGlobal(globalIdx)
+		}
+
+		cache[path] = mod
+		return mod, nil
+	}
+
+	return func(path string) (*object.Module, error) {
+		return load(entryPath, path)
+	}
 }
 
 func printHelp() {
@@ -178,4 +230,54 @@ func printHelp() {
 	fmt.Println("  lotus --console")
 	fmt.Println("  lotus --console --engine eval")
 	fmt.Println("  lotus --version")
+}
+func makeModuleLoader() vm.ModuleLoader {
+	cache := map[string]*object.Module{}
+
+	var load func(importerPath, path string) (*object.Module, error)
+	load = func(importerPath, path string) (*object.Module, error) {
+		// Resolve path relative to the importing file's directory
+		if !filepath.IsAbs(path) {
+			base := filepath.Dir(importerPath)
+			path = filepath.Join(base, path)
+		}
+		// Normalize so cache keys are consistent
+		path = filepath.Clean(path)
+
+		if mod, ok := cache[path]; ok {
+			return mod, nil
+		}
+
+		program := mustParse(path)
+
+		comp := compiler.New()
+		if err := comp.Compile(program); err != nil {
+			return nil, fmt.Errorf("compile error in %q: %w", path, err)
+		}
+
+		bytecode := comp.Bytecode()
+		// Pass path as the importer for any nested imports inside this module
+		machine := vm.NewWithLoader(bytecode, func(childPath string) (*object.Module, error) {
+			return load(path, childPath)
+		})
+		if err := machine.Run(); err != nil {
+			return nil, fmt.Errorf("runtime error in %q: %w", path, err)
+		}
+
+		mod := &object.Module{
+			Path:    path,
+			Exports: make(map[string]object.Object),
+		}
+		for name, globalIdx := range bytecode.ExportedSymbols {
+			mod.Exports[name] = machine.GetGlobal(globalIdx)
+		}
+
+		cache[path] = mod
+		return mod, nil
+	}
+
+	// The top-level loader uses the entry file's path as the importer
+	return func(path string) (*object.Module, error) {
+		return load(path, path)
+	}
 }

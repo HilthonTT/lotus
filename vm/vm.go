@@ -27,6 +27,10 @@ var False = &object.Boolean{Value: false}
 // Nil - pointer to a Lotus object.Nil.
 var Nil = &object.Nil{}
 
+// ModuleLoader compiles and runs a .lotus file, returning its exported values.
+// Provided by main.go to keep parsing/lexing out of the VM.
+type ModuleLoader func(path string) (*object.Module, error)
+
 // VM defines our Virtual Machine.
 type VM struct {
 	constants     []object.Object
@@ -36,10 +40,16 @@ type VM struct {
 	frames        []*Frame
 	framesIndex   int
 	maxFramesUsed int
+	loader        ModuleLoader
+	moduleCache   map[string]*object.Module
 }
 
 // New initializes and returns a pointer to a VM.
 func New(bytecode *compiler.Bytecode) *VM {
+	return NewWithLoader(bytecode, nil)
+}
+
+func NewWithLoader(bytecode *compiler.Bytecode, loader ModuleLoader) *VM {
 	mainFn := &object.CompiledFunction{Instructions: bytecode.Instructions}
 	mainClosure := &object.Closure{Fn: mainFn}
 	mainFrame := NewFrame(mainClosure, 0)
@@ -52,7 +62,8 @@ func New(bytecode *compiler.Bytecode) *VM {
 	// order, and packages are defined after builtins — so we resolve each
 	// name against a fresh compiler to find its index.
 	seedCompiler := compiler.New()
-	for name, pkg := range compiler.BuiltinPackages {
+	for _, name := range compiler.BuiltinPackageOrder {
+		pkg := compiler.BuiltinPackages[name]
 		sym, ok := seedCompiler.PublicResolve(name)
 		if ok {
 			globals[sym.Index] = pkg
@@ -66,6 +77,8 @@ func New(bytecode *compiler.Bytecode) *VM {
 		globals:     globals,
 		frames:      frames,
 		framesIndex: 1,
+		loader:      loader,
+		moduleCache: make(map[string]*object.Module),
 	}
 }
 
@@ -96,6 +109,10 @@ func (vm *VM) LastPoppedStackElement() object.Object {
 	return vm.stack[vm.sp]
 }
 
+func (vm *VM) GetGlobal(index int) object.Object {
+	return vm.globals[index]
+}
+
 // Run runs our VM and starts the fetch-decode-execute cycle.
 func (vm *VM) Run() error {
 	var ip int
@@ -113,8 +130,7 @@ func (vm *VM) Run() error {
 		case code.OpConstant:
 			constIndex := code.ReadUint16(ins[ip+1:])
 			vm.currentFrame().ip += 2
-
-			if err := vm.push(vm.constants[constIndex]); err != nil {
+			if err := vm.push(vm.currentConstants()[constIndex]); err != nil {
 				return err
 			}
 
@@ -346,11 +362,8 @@ func (vm *VM) Run() error {
 		case code.OpNewClass:
 			nameIdx := code.ReadUint16(ins[ip+1:])
 			vm.currentFrame().ip += 2
-			name := vm.constants[nameIdx].(*object.String).Value
-			class := &object.Class{
-				Name:    name,
-				Methods: make(map[string]*object.Closure),
-			}
+			name := vm.currentConstants()[nameIdx].(*object.String).Value
+			class := &object.Class{Name: name, Methods: make(map[string]*object.Closure)}
 			if err := vm.push(class); err != nil {
 				return err
 			}
@@ -377,7 +390,7 @@ func (vm *VM) Run() error {
 		case code.OpDefineMethod:
 			nameIdx := code.ReadUint16(ins[ip+1:])
 			vm.currentFrame().ip += 2
-			methodName := vm.constants[nameIdx].(*object.String).Value
+			methodName := vm.currentConstants()[nameIdx].(*object.String).Value
 			closure := vm.pop().(*object.Closure)
 			cls := vm.pop()
 			class, ok := cls.(*object.Class)
@@ -390,36 +403,36 @@ func (vm *VM) Run() error {
 				return err
 			}
 
-		// OpGetField pops an instance and pushes the value of the named field.
-		// Falls back to nil if neither a field nor a method with that name exists.
+			// OpGetField pops an instance and pushes the value of the named field.
+			// Falls back to nil if neither a field nor a method with that name exists.
 		case code.OpGetField:
 			nameIdx := code.ReadUint16(ins[ip+1:])
 			vm.currentFrame().ip += 2
-			fieldName := vm.constants[nameIdx].(*object.String).Value
+			fieldName := vm.currentConstants()[nameIdx].(*object.String).Value
 			obj := vm.pop()
 			if err := vm.executeGetField(obj, fieldName); err != nil {
 				return err
 			}
 
-		// OpSetField pops (value, instance) and stores the field.
+			// OpSetField pops (value, instance) and stores the field.
 		case code.OpSetField:
 			nameIdx := code.ReadUint16(ins[ip+1:])
 			vm.currentFrame().ip += 2
-			fieldName := vm.constants[nameIdx].(*object.String).Value
+			fieldName := vm.currentConstants()[nameIdx].(*object.String).Value
 			value := vm.pop()
 			obj := vm.pop()
 			if err := vm.executeSetField(obj, fieldName, value); err != nil {
 				return err
 			}
 
-		// OpInvokeMethod: stack is [..., receiver, arg1..argN].
-		// For a plain Instance, receiver == self.
-		// For a SuperAccessor, we replace it with the real self before calling.
+			// OpInvokeMethod: stack is [..., receiver, arg1..argN].
+			// For a plain Instance, receiver == self.
+			// For a SuperAccessor, we replace it with the real self before calling.
 		case code.OpInvokeMethod:
 			nameIdx := code.ReadUint16(ins[ip+1:])
 			numArgs := int(code.ReadUint8(ins[ip+3:]))
 			vm.currentFrame().ip += 3
-			methodName := vm.constants[nameIdx].(*object.String).Value
+			methodName := vm.currentConstants()[nameIdx].(*object.String).Value
 			if err := vm.executeInvokeMethod(methodName, numArgs); err != nil {
 				return err
 			}
@@ -443,12 +456,53 @@ func (vm *VM) Run() error {
 				return err
 			}
 
+		case code.OpRunModule:
+			pathIdx := code.ReadUint16(ins[ip+1:])
+			vm.currentFrame().ip += 2
+			path := vm.currentConstants()[pathIdx].(*object.String).Value
+
+			if vm.loader == nil {
+				return fmt.Errorf("import of %q failed: no module loader configured", path)
+			}
+
+			// Check cache first
+			if mod, ok := vm.moduleCache[path]; ok {
+				if err := vm.push(mod); err != nil {
+					return err
+				}
+				break
+			}
+
+			mod, err := vm.loader(path)
+			if err != nil {
+				return fmt.Errorf("import %q: %w", path, err)
+			}
+			vm.moduleCache[path] = mod
+			if err := vm.push(mod); err != nil {
+				return err
+			}
+
+		case code.OpDup:
+			top := vm.stack[vm.sp-1]
+			if err := vm.push(top); err != nil {
+				return err
+			}
+
 		default:
 			return fmt.Errorf("unknown opcode: %d", op)
 		}
 	}
 
 	return nil
+}
+
+// currentConstants returns the constants pool for the currently executing frame.
+// Closures imported from other modules carry their own pool.
+func (vm *VM) currentConstants() []object.Object {
+	if c := vm.currentFrame().constants; c != nil {
+		return c
+	}
+	return vm.constants
 }
 
 func (vm *VM) executeGetField(obj object.Object, name string) error {
@@ -474,6 +528,13 @@ func (vm *VM) executeGetField(obj object.Object, name string) error {
 			Name: o.Name + "." + name,
 			Fn:   object.BuiltinFunction(fn),
 		})
+
+	case *object.Module:
+		val, ok := o.Exports[name]
+		if !ok {
+			return fmt.Errorf("module %q has no export '%s'", o.Path, name)
+		}
+		return vm.push(val)
 
 	default:
 		return fmt.Errorf("field access on non-instance (%s)", obj.Type())
@@ -561,8 +622,6 @@ func (vm *VM) callClass(class *object.Class, numArgs int) error {
 }
 
 func (vm *VM) callMethod(cl *object.Closure, numArgs int) error {
-	// numArgs does NOT include self — self is already on the stack below the args.
-	// Total params = numArgs + 1 (self). basePointer points at self.
 	totalArgs := numArgs + 1
 	if totalArgs != cl.Fn.NumParams {
 		return fmt.Errorf("%s: expected %d arguments, got %d",
@@ -576,6 +635,7 @@ func (vm *VM) callMethod(cl *object.Closure, numArgs int) error {
 		f.basePointer = basePointer
 		f.initInstance = nil
 		f.isMethod = true
+		f.constants = cl.Constants // <- propagate
 		vm.framesIndex++
 	} else {
 		f := NewFrame(cl, basePointer)
@@ -924,12 +984,14 @@ func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
 			cl.Fn.Name, cl.Fn.NumParams, numArgs)
 	}
 
-	// Reuse existing frame slot if possible to reduce allocations
 	if vm.framesIndex < vm.maxFramesUsed {
-		vm.frames[vm.framesIndex].basePointer = vm.sp - numArgs
-		vm.frames[vm.framesIndex].ip = -1
-		vm.frames[vm.framesIndex].closure = cl
-		vm.frames[vm.framesIndex].initInstance = nil // reset
+		f := vm.frames[vm.framesIndex]
+		f.basePointer = vm.sp - numArgs
+		f.ip = -1
+		f.closure = cl
+		f.initInstance = nil
+		f.isMethod = false
+		f.constants = cl.Constants // ← propagate
 		vm.framesIndex++
 		vm.sp = vm.sp - numArgs + cl.Fn.NumLocals
 	} else {
@@ -952,7 +1014,7 @@ func (vm *VM) callBuiltin(builtin *object.Builtin, numArgs int) error {
 }
 
 func (vm *VM) pushClosure(constIndex int, numFree int) error {
-	constant := vm.constants[constIndex]
+	constant := vm.currentConstants()[constIndex]
 
 	function, ok := constant.(*object.CompiledFunction)
 	if !ok {
@@ -965,7 +1027,11 @@ func (vm *VM) pushClosure(constIndex int, numFree int) error {
 	}
 	vm.sp -= numFree
 
-	return vm.push(&object.Closure{Fn: function, Free: free})
+	return vm.push(&object.Closure{
+		Fn:        function,
+		Free:      free,
+		Constants: vm.currentConstants(), // carry this pool into the closure
+	})
 }
 
 // --- Helpers ---

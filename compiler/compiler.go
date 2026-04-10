@@ -9,8 +9,9 @@ import (
 )
 
 type Bytecode struct {
-	Instructions code.Instructions
-	Constants    []object.Object
+	Instructions    code.Instructions
+	Constants       []object.Object
+	ExportedSymbols map[string]int // name → global index, for module consumers
 }
 
 // EmittedInstruction represents an instruction through an opcode and it's position
@@ -40,7 +41,8 @@ type Compiler struct {
 	loopStarts []int   // stack of loop start positions
 	breakPos   [][]int // stack of break placeholder positions
 
-	inClass bool // true while compiling class methods (enables 'super')
+	inClass         bool           // true while compiling class methods (enables 'super')
+	exportedSymbols map[string]int // tracks which globals are exported
 }
 
 func New() *Compiler {
@@ -56,23 +58,25 @@ func New() *Compiler {
 		symbolTable.DefineBuiltin(i, v.Name)
 	}
 
-	for name := range BuiltinPackages {
+	for _, name := range BuiltinPackageOrder {
 		symbolTable.Define(name, false)
 	}
 
 	return &Compiler{
-		constants:   []object.Object{},
-		symbolTable: symbolTable,
-		scopes:      []CompilationScope{mainScope},
-		scopeIndex:  0,
+		constants:       []object.Object{},
+		symbolTable:     symbolTable,
+		scopes:          []CompilationScope{mainScope},
+		scopeIndex:      0,
+		exportedSymbols: make(map[string]int),
 	}
 }
 
-// Bytecode returns a pointer to a Bytecode intialized with our compilers instructions & constants
+// Bytecode returns a pointer to a Bytecode initialized with our compilers instructions & constants
 func (c *Compiler) Bytecode() *Bytecode {
 	return &Bytecode{
-		Instructions: c.currentInstructions(),
-		Constants:    c.constants,
+		Instructions:    c.currentInstructions(),
+		Constants:       c.constants,
+		ExportedSymbols: c.exportedSymbols,
 	}
 }
 
@@ -202,7 +206,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		c.emit(code.OpIndexSet)
 
-		// OOP statements
+	// OOP statements
 
 	case *ast.ClassStatement:
 		if err := c.compileClass(node); err != nil {
@@ -689,6 +693,90 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 		c.emit(code.OpIndex)
+
+	case *ast.ExportStatement:
+		if err := c.compileExport(node); err != nil {
+			return err
+		}
+
+	case *ast.ImportStatement:
+		if err := c.compileImport(node); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// compileExport compiles the inner statement and records the exported name.
+func (c *Compiler) compileExport(node *ast.ExportStatement) error {
+	if err := c.Compile(node.Statement); err != nil {
+		return err
+	}
+
+	// Determine the exported name from the inner statement type.
+	switch inner := node.Statement.(type) {
+	case *ast.LetStatement:
+		sym, ok := c.symbolTable.Resolve(inner.Name.Value)
+		if ok && sym.Scope == GlobalScope {
+			c.exportedSymbols[inner.Name.Value] = sym.Index
+		}
+
+	case *ast.ExpressionStatement:
+		// export fn foo() {} is parsed as ExpressionStatement{FunctionLiteral}
+		if fn, ok := inner.Expression.(*ast.FunctionLiteral); ok && fn.Name != "" {
+			sym, ok := c.symbolTable.Resolve(fn.Name)
+			if ok && sym.Scope == GlobalScope {
+				c.exportedSymbols[fn.Name] = sym.Index
+			}
+		}
+
+	case *ast.ClassStatement:
+		sym, ok := c.symbolTable.Resolve(inner.Name.Value)
+		if ok && sym.Scope == GlobalScope {
+			c.exportedSymbols[inner.Name.Value] = sym.Index
+		}
+	}
+
+	return nil
+}
+
+// compileImport emits OpRunModule + per-name field-get/set-global pairs.
+//
+// Stack discipline for import { x, y } from "foo":
+//
+//	OpRunModule          → [module]
+//	OpDup                → [module, module]   (all but last name)
+//	OpGetField "x"       → [module, x]
+//	OpSetGlobal x_idx    → [module]
+//	OpGetField "y"       → [y]                (no dup for last)
+//	OpSetGlobal y_idx    → []
+func (c *Compiler) compileImport(node *ast.ImportStatement) error {
+	if len(node.Names) == 0 {
+		return fmt.Errorf("import statement has no names")
+	}
+
+	pathIdx := c.addConstant(&object.String{Value: node.Path})
+	c.emit(code.OpRunModule, pathIdx)
+
+	for i, name := range node.Names {
+		isLast := i == len(node.Names)-1
+
+		if !isLast {
+			c.emit(code.OpDup)
+		}
+
+		// Get the field from the module
+		nameIdx := c.addConstant(&object.String{Value: name.Value})
+		c.emit(code.OpGetField, nameIdx)
+
+		// Define the name as a global in this scope and store it
+		sym := c.symbolTable.Define(name.Value, false)
+		if sym.Scope == GlobalScope {
+			c.emit(code.OpSetGlobal, sym.Index)
+		} else {
+			c.emit(code.OpSetLocal, sym.Index)
+		}
 	}
 
 	return nil

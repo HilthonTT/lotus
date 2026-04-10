@@ -128,6 +128,8 @@ var opcodeComments = map[Opcode]string{
 	OpSetField:     "pop value+instance, set named field",
 	OpInvokeMethod: "invoke named method with N args (self is receiver)",
 	OpGetSuper:     "push super-accessor for current self",
+	OpRunModule:    "compile+run module file, push module object",
+	OpDup:          "duplicate top of stack",
 }
 
 type Opcode byte
@@ -211,6 +213,13 @@ const (
 	OpInvokeMethod
 	// OpGetSuper pushes a SuperAccessor for the current method's self/superclass.
 	OpGetSuper
+
+	// OpRunModule compiles and runs a .lotus file, pushes a Module object.
+	// Operand: const_idx of the path string (2 bytes).
+	OpRunModule
+
+	// OpDup duplicates the top of stack (used to access module fields multiple times).
+	OpDup
 )
 
 type Definition struct {
@@ -263,6 +272,8 @@ var definitions = map[Opcode]*Definition{
 	OpSetField:     {"OpSetField", []int{2}},
 	OpInvokeMethod: {"OpInvokeMethod", []int{2, 1}},
 	OpGetSuper:     {"OpGetSuper", []int{}},
+	OpRunModule:    {"OpRunModule", []int{2}}, // Operand: const_idx of the path string (2 bytes).
+	OpDup:          {"OpDup", []int{}},
 }
 
 // Lookup finds the Definition for a given opcode byte.

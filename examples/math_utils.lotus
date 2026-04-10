@@ -1,0 +1,21 @@
+// math_utils.lotus
+export fn add(a, b) {
+    return a + b
+}
+
+export fn multiply(a, b) {
+    return a * b
+}
+
+export let PI = 3.14159
+
+export class Vector {
+    fn init(self, x, y) {
+        self.x = x
+        self.y = y
+    }
+
+    fn length(self) {
+        return Math.sqrt(self.x * self.x + self.y * self.y)
+    }
+}

@@ -1,0 +1,9 @@
+// main.lotus
+import { add, multiply, PI, Vector } from "math_utils.lotus"
+
+print(str(add(3, 4)))        // 7
+print(str(multiply(3, 4)))   // 12
+print(str(PI))               // 3.14159
+
+let v = Vector(3.0, 4.0)
+print(str(v.length()))       // 5.0

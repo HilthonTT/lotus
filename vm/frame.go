@@ -21,6 +21,7 @@ type Frame struct {
 	basePointer  int              // Keeps track of the stacks pointer's value before we execute a function so we can restore stack to this value after executing
 	initInstance *object.Instance // non-nil when this frame is an __init__ call
 	isMethod     bool             // if true, OpReturn uses sp=basePointer (not basePointer-1)
+	constants    []object.Object  // frame-local constants pool (nil = use vm.constants)
 }
 
 // Instructions returns the frame's function's instructions
@@ -35,5 +36,6 @@ func NewFrame(cl *object.Closure, basePointer int) *Frame {
 		closure:     cl,
 		ip:          -1,
 		basePointer: basePointer, // The pointer that points to the bottom of the stack of the current call frame. (Sometimes called "FramePointer")
+		constants:   cl.Constants,
 	}
 }

@@ -83,6 +83,10 @@ const (
 	SUPER   TokenType = "SUPER"
 
 	QUESTION TokenType = "?"
+
+	EXPORT TokenType = "EXPORT"
+	IMPORT TokenType = "IMPORT"
+	FROM   TokenType = "FROM"
 )
 
 var keywords = map[string]TokenType{
@@ -104,6 +108,9 @@ var keywords = map[string]TokenType{
 	"extends":  EXTENDS,
 	"self":     SELF,
 	"super":    SUPER,
+	"export":   EXPORT,
+	"import":   IMPORT,
+	"from":     FROM,
 }
 
 func LookupIdentifier(identifier string) TokenType {

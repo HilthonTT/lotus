@@ -217,9 +217,71 @@ func (p *Parser) parseStatement() ast.Statement {
 		return &ast.ContinueStatement{Token: p.curToken}
 	case token.CLASS:
 		return p.parseClassStatement()
+	case token.EXPORT:
+		return p.parseExportStatement()
+	case token.IMPORT:
+		return p.parseImportStatement()
 	default:
 		return p.parseExpressionOrAssignStatement()
 	}
+}
+
+// parseExportStatement: export let/fn/class ...
+func (p *Parser) parseExportStatement() *ast.ExportStatement {
+	stmt := &ast.ExportStatement{Token: p.curToken}
+
+	p.nextToken() // move past 'export'
+
+	inner := p.parseStatement()
+	if inner == nil {
+		return nil
+	}
+	stmt.Statement = inner
+	return stmt
+}
+
+// parseImportStatement: import { x, y } from "path"
+func (p *Parser) parseImportStatement() *ast.ImportStatement {
+	stmt := &ast.ImportStatement{Token: p.curToken}
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+
+	// Parse comma-separated identifiers inside { }
+	if p.peekTokenIs(token.RBRACE) {
+		p.nextToken()
+	} else {
+		p.nextToken()
+		stmt.Names = append(stmt.Names, &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		})
+		for p.peekTokenIs(token.COMMA) {
+			p.nextToken() // consume ','
+			p.nextToken()
+			stmt.Names = append(stmt.Names, &ast.Identifier{
+				Token: p.curToken,
+				Value: p.curToken.Literal,
+			})
+		}
+		if !p.expectPeek(token.RBRACE) {
+			return nil
+		}
+	}
+
+	if !p.expectPeek(token.FROM) {
+		return nil
+	}
+	if !p.expectPeek(token.STRING) {
+		return nil
+	}
+	stmt.Path = p.curToken.Literal
+
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+	return stmt
 }
 
 // parseClassStatement handles: class Foo [extends Bar] { fn method(self, ...) { } ... }
