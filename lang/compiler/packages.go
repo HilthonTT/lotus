@@ -3,6 +3,7 @@ package compiler
 import (
 	"bufio"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strconv"
 	"strings"
@@ -143,6 +144,10 @@ func mathPackage() *object.Package {
 			},
 			"pi": func(args ...object.Object) object.Object {
 				return &object.Float{Value: 3.141592653589793}
+			},
+			"random": func(args ...object.Object) object.Object {
+				randomNum := rand.Float64()
+				return &object.Float{Value: randomNum}
 			},
 		},
 	}

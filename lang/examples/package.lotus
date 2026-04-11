@@ -14,6 +14,7 @@ print(str(Math.sqrt(16.0)))   // 4.0
 print(str(Math.pow(2.0, 8.0))) // 256.0
 print(str(Math.abs(-42)))      // 42
 print(str(Math.pi()))          // 3.141592653589793
+print(str(Math.random()))
 
 // OS package
 let content = OS.readFile("hello.txt")
