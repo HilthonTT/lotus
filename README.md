@@ -55,6 +55,9 @@ go build -o lotus .
 # Start the interactive REPL (VM engine, default)
 ./lotus --console
 
+# Start the web playground
+./lotus --playground
+
 # Start the REPL with the evaluator
 ./lotus --console --engine eval
 
