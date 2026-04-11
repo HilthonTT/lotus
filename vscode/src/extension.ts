@@ -9,37 +9,31 @@ import {
 
 let client: LanguageClient | undefined;
 
-function toWslPath(windowsPath: string): string {
-  // C:\Users\foo\bar  →  /mnt/c/Users/foo/bar
-  return windowsPath
-    .replace(/\\/g, "/")
-    .replace(/^([A-Za-z]):/, (_, d) => `/mnt/${d.toLowerCase()}`);
-}
-
 export async function activate(
   context: vscode.ExtensionContext,
 ): Promise<void> {
+  const out = vscode.window.createOutputChannel("Lotus LSP Debug");
+  out.show();
+  out.appendLine("Lotus extension activating...");
+
   const binName = "lotus-lsp-linux";
   const binPath = context.asAbsolutePath(path.join("bin", binName));
+  out.appendLine(`Binary path (Windows): ${binPath}`);
 
-  let serverOptions: ServerOptions;
+  // Convert C:\foo\bar → /mnt/c/foo/bar
+  const wslPath = binPath
+    .replace(/\\/g, "/")
+    .replace(/^([A-Za-z]):/, (_, d) => `/mnt/${d.toLowerCase()}`);
+  out.appendLine(`Binary path (WSL): ${wslPath}`);
 
-  if (process.platform === "win32") {
-    const wslPath = toWslPath(binPath);
-    // Show the path so you can verify it in the output panel
-    vscode.window.showInformationMessage(`Lotus LSP: launching ${wslPath}`);
-
-    serverOptions = {
-      command: "wsl",
-      args: ["bash", "-c", `chmod +x "${wslPath}" && "${wslPath}"`],
-      transport: TransportKind.stdio,
-    };
-  } else {
-    serverOptions = {
-      command: binPath,
-      transport: TransportKind.stdio,
-    };
-  }
+  const serverOptions: ServerOptions = {
+    command: "wsl",
+    args: ["bash", "-lc", `chmod +x "${wslPath}" && exec "${wslPath}"`],
+    transport: TransportKind.stdio,
+    options: {
+      env: { ...process.env },
+    },
+  };
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "lotus" }],
@@ -53,7 +47,14 @@ export async function activate(
     clientOptions,
   );
 
-  await client.start();
+  try {
+    out.appendLine("Starting LSP client...");
+    await client.start();
+    out.appendLine("LSP client started successfully!");
+  } catch (e) {
+    out.appendLine(`LSP client failed to start: ${e}`);
+    vscode.window.showErrorMessage(`Lotus LSP failed: ${e}`);
+  }
 }
 
 export function deactivate(): Thenable<void> | undefined {

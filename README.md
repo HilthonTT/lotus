@@ -36,6 +36,8 @@ Source → Lexer → Parser → Compiler → Bytecode → VM → Result
 | Builtins     | `compiler/`  | Built-in functions shared by compiler and evaluator   |
 | Evaluator    | `evaluator/` | Tree-walking interpreter (alternative execution mode) |
 | REPL         | `repl/`      | Interactive read-eval-print loop                      |
+| LSP          | `lotus-lsp/` | Language server (completions, hover, diagnostics)     |
+| VS Code      | `vscode/`    | VS Code extension with syntax highlighting and LSP    |
 | Version      | `version/`   | Build metadata (version, commit, build time)          |
 
 ## Quick Start
@@ -71,6 +73,74 @@ go build -o lotus .
 # Run tests
 go test -v ./...
 ```
+
+## VS Code Extension
+
+The `vscode/` directory contains a VS Code extension that provides:
+
+- **Syntax highlighting** — keywords, types, functions, operators, strings, comments
+- **Autocomplete** — keywords, builtins, package members (`Math.`, `Console.`, `OS.`), user-defined symbols and class members
+- **Hover documentation** — inline docs for built-in functions and packages
+- **Bracket matching and auto-closing** — for `{}`, `[]`, `()`, `""`
+- **Comment toggling** — `//` line comments
+
+### Installing the Extension
+
+The extension requires [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) on Windows, as the LSP server is compiled as a Linux binary.
+
+**1. Build the LSP binary:**
+
+```bash
+cd lotus-lsp
+GOOS=linux GOARCH=amd64 go build -o ../vscode/bin/lotus-lsp-linux .
+```
+
+**2. Build and package the extension:**
+
+```bash
+cd vscode
+npm install
+npm run package        # bundles + runs vsce package
+```
+
+**3. Install in VS Code:**
+
+```bash
+code --install-extension lotus-lang-0.1.0.vsix
+```
+
+Or: **Ctrl+Shift+P** → "Extensions: Install from VSIX" → select the `.vsix` file.
+
+### LSP Features
+
+The language server (`lotus-lsp/`) is built in Go and communicates with VS Code over stdio using the [JSON-RPC 2.0](https://www.jsonrpc.org/specification) protocol.
+
+| Feature            | Details                                                        |
+| ------------------ | -------------------------------------------------------------- |
+| Completions        | Keywords, builtins, packages, user symbols, class members      |
+| Dot completions    | `Math.`, `Console.`, `OS.`, `v.` (instance fields and methods) |
+| Hover docs         | Signatures and descriptions for all builtins and packages      |
+| Document sync      | Full document sync on open and change                          |
+| Trigger characters | `.` triggers member completions                                |
+
+### Extension Structure
+
+```
+vscode/
+├── bin/                    ← compiled LSP binary (git-ignored)
+│   └── lotus-lsp-linux
+├── out/                    ← compiled extension JS (git-ignored)
+│   └── extension.js
+├── src/
+│   └── extension.ts        ← extension entry point
+├── syntaxes/
+│   └── lotus-tmLanguage.json
+├── language-configuration.json
+├── package.json
+└── tsconfig.json
+```
+
+---
 
 ## Language Reference
 
@@ -174,6 +244,42 @@ let doubled = map([1, 2, 3], fn(x) { x * 2 })
 // => [2, 4, 6]
 ```
 
+### Classes
+
+```rust
+class Animal {
+    fn init(self, name) {
+        self.name = name
+    }
+
+    fn speak(self) {
+        return self.name + " makes a sound."
+    }
+}
+
+class Dog extends Animal {
+    fn speak(self) {
+        return self.name + " barks."
+    }
+}
+
+let d = Dog("Rex")
+print(d.speak())   // Rex barks.
+```
+
+### Modules
+
+```rust
+// math_utils.lotus
+export fn add(a, b) { return a + b }
+export let PI = 3.14159
+
+// main.lotus
+import { add, PI } from "math_utils.lotus"
+print(str(add(1, 2)))   // 3
+print(str(PI))          // 3.14159
+```
+
 ### Indexing
 
 ```rust
@@ -191,21 +297,6 @@ mut nums = [1, 2, 3]
 nums[0] = 99
 ```
 
-### Method Dispatch
-
-Objects in Lotus support built-in methods via `.methods()`:
-
-```rust
-let arr = [1, 2, 3]
-arr.len()       // 3
-arr.methods()   // ["len", "methods"]
-
-let m = {"a": 1, "b": 2}
-m.len()         // 2
-m.keys()        // ["a", "b"]
-m.values()      // [1, 2]
-```
-
 ### Built-in Functions
 
 | Function     | Description                                                                        |
@@ -221,12 +312,33 @@ m.values()      // [1, 2]
 | `int(x)`     | Convert value to integer                                                           |
 | `range(...)` | Generate integer array: `range(n)`, `range(start, end)`, `range(start, end, step)` |
 
+### Built-in Packages
+
+| Package   | Members                                                                  |
+| --------- | ------------------------------------------------------------------------ |
+| `Console` | `readLine`, `prompt`, `print`, `printErr`, `clear`                       |
+| `Math`    | `sqrt`, `abs`, `floor`, `pow`, `max`, `min`, `pi`                        |
+| `OS`      | `exit`, `args`, `env`, `readFile`, `writeFile`, `parseInt`, `parseFloat` |
+
+```rust
+let name = Console.prompt("Enter your name: ")
+print("Hello, " + name + "!")
+
+print(str(Math.sqrt(16.0)))   // 4.0
+print(str(Math.pi()))         // 3.141592653589793
+
+let content = OS.readFile("hello.txt")
+OS.writeFile("out.txt", "Hello from Lotus!")
+```
+
 ### Comments
 
 ```rust
 // Single-line comments
 let x = 42 // inline comment
 ```
+
+---
 
 ## Example: Quicksort
 
@@ -262,6 +374,8 @@ print("Sorted:", str(quicksort(unsorted)))
 // => Sorted: [3, 9, 10, 27, 38, 43, 82]
 ```
 
+---
+
 ## Execution Engines
 
 Lotus supports two execution modes, selectable via `--engine`:
@@ -275,7 +389,7 @@ Both engines share the same lexer, parser, and built-in functions. The VM engine
 
 ## Bytecode & Disassembly
 
-Lotus compiles to a custom bytecode with 30+ opcodes. You can inspect the generated bytecode for any source file using the `--dis` flag. Each compiled function is printed under its own header. Anonymous functions appear as `<fn:N>` where `N` is their index in the constant pool.
+Lotus compiles to a custom bytecode with 30+ opcodes. You can inspect the generated bytecode for any source file using the `--dis` flag.
 
 ```bash
 ./lotus --dis examples/showcase.lotus
@@ -292,28 +406,6 @@ Lotus compiles to a custom bytecode with 30+ opcodes. You can inspect the genera
 0008 OpGetGlobal 0
 0011 OpCall 1
 0013 OpPop
-
-=== quicksort ===
-0000 OpConstant 103
-0003 OpGetBuiltin 1
-0005 OpGetLocal 0
-0007 OpCall 1
-0009 OpGreaterEq
-0010 OpJumpFalse 19
-0013 OpGetLocal 0
-0015 OpReturn
-0016 OpJump 20
-0019 OpNil
-0020 OpPop
-...
-0213 OpGetLocal 9
-0215 OpReturn
-
-=== <fn:79> ===
-0000 OpGetLocal 0
-0002 OpConstant 78
-0005 OpMul
-0006 OpReturn
 ```
 
 **Annotated disassembly** (`--dis --annotated`):
@@ -326,17 +418,6 @@ Lotus compiles to a custom bytecode with 30+ opcodes. You can inspect the genera
 0008 OpGetGlobal 0              // load global variable
 0011 OpCall 1                   // call function with N arguments
 0013 OpPop                      // discard top of stack
-
-=== quicksort ===
-0000 OpConstant 103             // push constant from pool
-0003 OpGetBuiltin 1             // load built-in function by index
-0005 OpGetLocal 0               // load local variable
-0007 OpCall 1                   // call function with N arguments
-0009 OpGreaterEq                // greater-than-or-equal comparison
-0010 OpJumpFalse 19             // jump if falsy (pops)
-0013 OpGetLocal 0               // load local variable
-0015 OpReturn                   // return value from function
-...
 ```
 
 **VM design:**

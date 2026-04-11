@@ -12,15 +12,11 @@ const (
 	kindVariable = 6
 	kindModule   = 9
 	kindKeyword  = 14
+	kindField    = 5
 )
 
-func intPtr(i int) *int {
-	return &i
-}
-
-func strPtr(s string) *string {
-	return &s
-}
+func intPtr(i int) *int       { return &i }
+func strPtr(s string) *string { return &s }
 
 type Analyzer struct {
 	keywords []string
@@ -29,16 +25,27 @@ type Analyzer struct {
 }
 
 type builtinDoc struct {
-	name      string
-	signature string
-	doc       string
+	name, signature, doc string
 }
 
 type packageMember struct {
-	name      string
-	signature string
-	doc       string
+	name, signature, doc string
 }
+
+// classInfo holds extracted fields and methods for a class.
+type classInfo struct {
+	fields  []string
+	methods []string
+}
+
+var (
+	reLetMut    = regexp.MustCompile(`\b(?:let|mut)\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
+	reFn        = regexp.MustCompile(`\bfn\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
+	reClass     = regexp.MustCompile(`\bclass\s+([A-Z][a-zA-Z0-9_]*)`)
+	reVarClass  = regexp.MustCompile(`\b(?:let|mut)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([A-Z][a-zA-Z0-9_]*)\s*\(`)
+	reSelfField = regexp.MustCompile(`\bself\.([a-zA-Z_][a-zA-Z0-9_]*)\s*=`)
+	reMethod    = regexp.MustCompile(`\bfn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*self`)
+)
 
 func NewAnalyzer() *Analyzer {
 	return &Analyzer{
@@ -90,10 +97,53 @@ func NewAnalyzer() *Analyzer {
 	}
 }
 
+// extractClasses parses class bodies from source and returns a map of
+// className -> classInfo (fields set via self.x = ..., and methods).
+func extractClasses(source string) map[string]classInfo {
+	classes := map[string]classInfo{}
+
+	// Find each class block: class Foo { ... }
+	reClassBlock := regexp.MustCompile(`(?s)\bclass\s+([A-Z][a-zA-Z0-9_]*)[^{]*\{(.*?)\n\}`)
+	for _, m := range reClassBlock.FindAllStringSubmatch(source, -1) {
+		name := m[1]
+		body := m[2]
+
+		seen := map[string]bool{}
+		info := classInfo{}
+
+		for _, fm := range reSelfField.FindAllStringSubmatch(body, -1) {
+			field := fm[1]
+			if !seen[field] {
+				seen[field] = true
+				info.fields = append(info.fields, field)
+			}
+		}
+		for _, mm := range reMethod.FindAllStringSubmatch(body, -1) {
+			method := mm[1]
+			if method != "init" {
+				info.methods = append(info.methods, method)
+			}
+		}
+		classes[name] = info
+	}
+	return classes
+}
+
+// extractVarTypes returns a map of varName -> className for lines like:
+// let v = Vector(3.0, 4.0)
+func extractVarTypes(source string) map[string]string {
+	varTypes := map[string]string{}
+	for _, m := range reVarClass.FindAllStringSubmatch(source, -1) {
+		varTypes[m[1]] = m[2]
+	}
+	return varTypes
+}
+
 func (a *Analyzer) Complete(source, prefix, receiver string) []CompletionItem {
 	var items []CompletionItem
 
 	if receiver != "" {
+		// Check builtin packages first
 		if members, ok := a.packages[receiver]; ok {
 			for _, m := range members {
 				m := m
@@ -104,10 +154,43 @@ func (a *Analyzer) Complete(source, prefix, receiver string) []CompletionItem {
 					Documentation: &MarkupContent{Kind: "markdown", Value: m.doc},
 				})
 			}
+			return items
 		}
+
+		// Check if receiver is a variable with a known class type
+		varTypes := extractVarTypes(source)
+		classes := extractClasses(source)
+
+		className, ok := varTypes[receiver]
+		if !ok {
+			// Maybe the receiver is itself a class name (static-style call)
+			className = receiver
+		}
+
+		if info, ok := classes[className]; ok {
+			for _, field := range info.fields {
+				field := field
+				items = append(items, CompletionItem{
+					Label:  field,
+					Kind:   intPtr(kindField),
+					Detail: strPtr(className + "." + field),
+				})
+			}
+			for _, method := range info.methods {
+				method := method
+				items = append(items, CompletionItem{
+					Label:  method,
+					Kind:   intPtr(kindMethod),
+					Detail: strPtr(className + "." + method + "(self, ...)"),
+				})
+			}
+			return items
+		}
+
 		return items
 	}
 
+	// No receiver — return keywords, builtins, packages, user symbols
 	for _, kw := range a.keywords {
 		if strings.HasPrefix(kw, prefix) {
 			kw := kw
@@ -151,12 +234,6 @@ func (a *Analyzer) HoverDoc(word string) string {
 	}
 	return ""
 }
-
-var (
-	reLetMut = regexp.MustCompile(`\b(?:let|mut)\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
-	reFn     = regexp.MustCompile(`\bfn\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
-	reClass  = regexp.MustCompile(`\bclass\s+([A-Z][a-zA-Z0-9_]*)`)
-)
 
 func extractUserSymbols(source string) []string {
 	seen := map[string]bool{}

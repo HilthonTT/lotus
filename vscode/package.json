@@ -4,6 +4,12 @@
   "description": "Syntax highlighting and autocomplete for the Lotus language",
   "version": "0.1.0",
   "publisher": "hilthontt",
+  "files": [
+    "bin/",
+    "out/",
+    "syntaxes/",
+    "language-configuration.json"
+  ],
   "engines": {
     "vscode": "^1.115.0"
   },
@@ -32,7 +38,7 @@
       {
         "language": "lotus",
         "scopeName": "source.lotus",
-        "path": "./syntaxes/lotus.tmLanguage.json"
+        "path": "./syntaxes/lotus-tmLanguage.json"
       }
     ]
   },
@@ -40,13 +46,15 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.115.0",
     "@types/node": "^18.0.0",
-    "typescript": "^5.0.0",
-    "@vscode/vsce": "^3.0.0"
+    "@types/vscode": "^1.115.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.0.0"
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "package": "vsce package"
+    "bundle": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "package": "npm run bundle && vsce package --allow-unused-files-pattern"
   }
 }

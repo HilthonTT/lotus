@@ -1,7 +1,4 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+# Binaries
 *.exe
 *.exe~
 *.dll
@@ -17,9 +14,6 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
 # Go workspace file
 go.work
 go.work.sum
@@ -28,7 +22,18 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
 
+# VS Code extension
 vscode/node_modules/
+vscode/out/
+vscode/*.vsix
+
+# LSP binary (built artifact, not committed)
+vscode/bin/
+lotus-lsp/lotus-lsp
+lotus-lsp/lotus-lsp-linux
+
+# Lotus binary
+lotus
