@@ -1,0 +1,91 @@
+// ── stringify ────────────────────────────────────────────
+let user = {
+    "name": "Alice",
+    "age":  30,
+    "active": true
+}
+
+let jsonStr = Json.stringify(user)
+print("Stringified: " + jsonStr)
+
+// ── prettyPrint ──────────────────────────────────────────
+print("Pretty:")
+print(Json.prettyPrint(user))
+
+// ── Arrays ───────────────────────────────────────────────
+let nums = [1, 2, 3, 4, 5]
+print("Array JSON: " + Json.stringify(nums))
+
+// ── parse ────────────────────────────────────────────────
+let raw = "{\"city\": \"Luxembourg\", \"pop\": 660000, \"eu\": true}"
+let parsed = Json.parse(raw)
+print("Parsed type: " + type(parsed))
+
+// Access parsed values
+let city = Json.get(raw, "city")
+let pop  = Json.get(raw, "pop")
+print("City: " + str(city))
+print("Pop:  " + str(pop))
+
+// ── valid ────────────────────────────────────────────────
+print("Valid JSON:   " + str(Json.valid("{\"ok\": true}")))
+print("Invalid JSON: " + str(Json.valid("{bad json")))
+print("Valid array:  " + str(Json.valid("[1,2,3]")))
+
+// ── keys ─────────────────────────────────────────────────
+let keys = Json.keys(raw)
+print("Keys: " + str(keys))
+
+// ── set ──────────────────────────────────────────────────
+let updated = Json.set(raw, "country", "Luxembourg")
+print("After set: " + Json.prettyPrint(Json.parse(updated)))
+
+// ── merge ────────────────────────────────────────────────
+let base     = "{\"name\": \"Alice\", \"role\": \"user\"}"
+let override = "{\"role\": \"admin\", \"level\": 5}"
+let merged   = Json.merge(base, override)
+print("Merged: " + merged)
+
+// ── round-trip ───────────────────────────────────────────
+class Person {
+    fn init(self, name: string, age: int) {
+        self.name = name
+        self.age  = age
+    }
+
+    fn toJson(self) -> string {
+        return Json.stringify({
+            "name": self.name,
+            "age":  self.age
+        })
+    }
+}
+
+let p = Person("Bob", 25)
+let personJson = p.toJson()
+print("Person JSON: " + personJson)
+
+// Parse it back
+let nameBack = Json.get(personJson, "name")
+let ageBack  = Json.get(personJson, "age")
+print("Name back: " + str(nameBack))
+print("Age back:  " + str(ageBack))
+
+// ── Nested structures ────────────────────────────────────
+let nested = {
+    "users": [
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "Bob"}
+    ],
+    "total": 2
+}
+
+print("Nested JSON:")
+print(Json.prettyPrint(nested))
+
+// ── Enum as JSON ─────────────────────────────────────────
+enum Status { Active, Inactive, Pending }
+
+let s = Status.Active
+print("Enum JSON: " + Json.stringify(s))
+

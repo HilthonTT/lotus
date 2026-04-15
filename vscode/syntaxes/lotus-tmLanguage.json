@@ -161,7 +161,7 @@
     },
     "packages": {
       "name": "support.class.lotus",
-      "match": "\\b(Console|Math|OS|Http|Task|String|Array)\\b(?=[.?])"
+      "match": "\\b(Console|Math|OS|Task|String|Array|Time|Json)\\b(?=[.?])"
     },
     "class-instantiation": {
       "match": "\\b([A-Z][a-zA-Z0-9_]*)\\s*(?=\\()",

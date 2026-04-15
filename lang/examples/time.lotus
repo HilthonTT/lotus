@@ -1,0 +1,79 @@
+// ── Basic time ───────────────────────────────────────────
+let now = Time.now()
+print("Unix ms:   " + str(now))
+print("Unix sec:  " + str(Time.unix(now)))
+print("Timezone:  " + Time.timezone())
+
+// ── Formatting ───────────────────────────────────────────
+print("Date:      " + Time.format(now, "2006-01-02"))
+print("Time:      " + Time.format(now, "15:04:05"))
+print("Full:      " + Time.format(now, "2006-01-02 15:04:05"))
+print("Weekday:   " + Time.weekday(now))
+print("Friendly:  " + Time.format(now, "Mon, 02 Jan 2006"))
+
+// ── Extracting parts ─────────────────────────────────────
+print("Year:      " + str(Time.year(now)))
+print("Month:     " + str(Time.month(now)))
+print("Day:       " + str(Time.day(now)))
+print("Hour:      " + str(Time.hour(now)))
+print("Minute:    " + str(Time.minute(now)))
+print("Second:    " + str(Time.second(now)))
+
+// ── Calendar arithmetic ───────────────────────────────────
+let tomorrow    = Time.addDays(now, 1)
+let nextWeek    = Time.addDays(now, 7)
+let nextMonth   = Time.addMonths(now, 1)
+let nextYear    = Time.addYears(now, 1)
+
+print("Tomorrow:  " + Time.format(tomorrow, "2006-01-02"))
+print("Next week: " + Time.format(nextWeek, "2006-01-02"))
+print("Next month:" + Time.format(nextMonth, "2006-01-02"))
+print("Next year: " + Time.format(nextYear, "2006-01-02"))
+
+// ── Start / end of day ────────────────────────────────────
+let sod = Time.startOfDay(now)
+let eod = Time.endOfDay(now)
+print("Start of day: " + Time.format(sod, "15:04:05"))
+print("End of day:   " + Time.format(eod, "15:04:05"))
+
+// ── Duration helpers ─────────────────────────────────────
+let oneHour   = Time.hours(1)
+let fiveMins  = Time.minutes(5)
+let tenSecs   = Time.seconds(10)
+
+print("1 hour in ms:   " + str(oneHour))
+print("5 mins in ms:   " + str(fiveMins))
+print("10 secs in ms:  " + str(tenSecs))
+
+// ── since / until ────────────────────────────────────────
+let past   = Time.add(now, -Time.minutes(90))
+let future = Time.add(now, Time.hours(2))
+
+print("Since 90m ago:  " + Time.duration(Time.since(past)))
+print("Until 2h from now: " + Time.duration(Time.until(future)))
+
+// ── Benchmarking ─────────────────────────────────────────
+let start = Time.now()
+
+mut total = 0
+for i in range(0, 100000) {
+    total = total + i
+}
+
+let elapsed = Time.since(start)
+print("Sum: " + str(total))
+print("Elapsed: " + Time.duration(elapsed))
+
+// ── Comparison ───────────────────────────────────────────
+let t1 = Time.now()
+Time.sleep(10)
+let t2 = Time.now()
+
+print("t1 before t2: " + str(Time.isBefore(t1, t2)))
+print("t2 after t1:  " + str(Time.isAfter(t2, t1)))
+print("diff: "         + str(Time.diff(t2, t1)) + "ms")
+
+// ── Parsing ──────────────────────────────────────────────
+let parsed = Time.parse("2025-12-25", "2006-01-02")
+print("Christmas: " + Time.format(parsed, "Mon, 02 Jan 2006"))
+print("Days until Christmas: " + Time.duration(Time.until(parsed)))

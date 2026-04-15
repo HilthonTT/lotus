@@ -157,3 +157,5 @@ print("\nUnsorted:", str(unsorted))
 print("Sorted:  ", str(quicksort(unsorted)))
 
 print("\nDone!")
+
+print(Time.now())

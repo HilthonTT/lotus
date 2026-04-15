@@ -180,6 +180,69 @@ print("Sorted:  \${str(sorted)}")
 print("Unique:  \${str(Array.unique([1,1,2,2,3]))}")
 print("Any>9:   \${str(Array.any(nums, fn(x) { x > 9 }))}")
 print("All>0:   \${str(Array.all(nums, fn(x) { x > 0 }))}")`,
+
+  timeFns: `// Time package
+let now = Time.now()
+print("Now:      " + Time.format(now, "2006-01-02 15:04:05"))
+print("Weekday:  " + Time.weekday(now))
+print("Timezone: " + Time.timezone())
+
+// Extract date parts
+print("Year:   " + str(Time.year(now)))
+print("Month:  " + str(Time.month(now)))
+print("Day:    " + str(Time.day(now)))
+
+// Calendar arithmetic
+let tomorrow  = Time.addDays(now, 1)
+let nextMonth = Time.addMonths(now, 1)
+print("Tomorrow:   " + Time.format(tomorrow, "2006-01-02"))
+print("Next month: " + Time.format(nextMonth, "2006-01-02"))
+
+// Duration helpers
+print("1 hour in ms: " + str(Time.hours(1)))
+print("5 mins in ms: " + str(Time.minutes(5)))
+
+// Benchmarking
+let start = Time.now()
+mut total = 0
+for i in range(0, 100000) { total = total + i }
+print("Sum: " + str(total))
+print("Elapsed: " + Time.duration(Time.since(start)))`,
+
+  jsonFns: `// Json package
+let user = {
+    "name": "Alice",
+    "age":  30,
+    "active": true
+}
+
+// Stringify and prettyPrint
+let json = Json.stringify(user)
+print("JSON: " + json)
+print("Pretty:")
+print(Json.prettyPrint(user))
+
+// Arrays
+let nums = [1, 2, 3, 4, 5]
+print("Array: " + Json.stringify(nums))
+
+// Parse and get
+let raw  = Json.stringify({"city": "Luxembourg", "pop": 660000})
+let city = Json.get(raw, "city")
+let pop  = Json.get(raw, "pop")
+print("City: " + str(city))
+print("Pop:  " + str(pop))
+
+// valid
+print("Valid:   " + str(Json.valid("{\\"ok\\": true}")))
+print("Invalid: " + str(Json.valid("{bad}")))
+
+// set / merge
+let updated = Json.set(raw, "country", "Luxembourg")
+let extra   = Json.stringify({"region": "Europe"})
+let merged  = Json.merge(updated, extra)
+print("Keys: " + str(Json.keys(merged)))
+print("Merged: " + Json.prettyPrint(Json.parse(merged)))`,
 };
 
 // ── Token sets ──────────────────────────────────────────────
@@ -220,6 +283,8 @@ const PACKAGES = new Set([
   "Task",
   "String",
   "Array",
+  "Time",
+  "Json",
 ]);
 const TYPES = new Set(["int", "float", "string", "bool", "array", "map"]);
 
@@ -264,21 +329,17 @@ function tokenise(code) {
   const tokens = [];
   let i = 0;
   while (i < code.length) {
-    // String literal — handles ${...} interpolation highlighting
     if (code[i] === '"') {
-      let j = i + 1;
-      let buf = '"';
+      let j = i + 1,
+        buf = '"';
       while (j < code.length && code[j] !== '"') {
         if (code[j] === "\\") {
           buf += code[j] + (code[j + 1] || "");
           j += 2;
           continue;
         }
-        // Highlight ${expr} inside string
         if (code[j] === "$" && code[j + 1] === "{") {
-          if (buf.length > 1) {
-            tokens.push(["tok-str", buf]);
-          }
+          if (buf.length > 1) tokens.push(["tok-str", buf]);
           buf = "";
           tokens.push(["tok-op", "${"]);
           j += 2;
@@ -295,10 +356,7 @@ function tokenise(code) {
             }
             exprBuf += code[j++];
           }
-          // Recursively highlight the expression inside
-          if (exprBuf) {
-            tokenise(exprBuf).forEach((t) => tokens.push(t));
-          }
+          if (exprBuf) tokenise(exprBuf).forEach((t) => tokens.push(t));
           tokens.push(["tok-op", "}"]);
           continue;
         }
@@ -310,7 +368,6 @@ function tokenise(code) {
       continue;
     }
 
-    // Number
     if (/[0-9]/.test(code[i])) {
       let j = i;
       while (j < code.length && /[0-9.]/.test(code[j])) j++;
@@ -319,13 +376,11 @@ function tokenise(code) {
       continue;
     }
 
-    // Identifier / keyword
     if (/[a-zA-Z_]/.test(code[i])) {
       let j = i;
       while (j < code.length && /[a-zA-Z0-9_]/.test(code[j])) j++;
       const word = code.slice(i, j);
       let cls = "raw";
-
       if (KEYWORDS_CTRL.has(word)) {
         cls = "tok-kw";
       } else if (KEYWORDS_DECL.has(word)) {
@@ -339,30 +394,24 @@ function tokenise(code) {
       } else if (PACKAGES.has(word)) {
         cls = "tok-pkg";
       } else if (TYPES.has(word)) {
-        // Only colour as type if preceded by ': ' or '->'
         const before = code.slice(0, i).trimEnd();
         if (before.endsWith(":") || before.endsWith("->")) {
           cls = "tok-type";
         }
       } else if (/^[A-Z]/.test(word)) {
         cls = "tok-class";
-      } else {
-        const after = code.slice(j).trimStart();
-        if (after.startsWith("(")) {
-          cls = "tok-fn";
-        }
+      } else if (code.slice(j).trimStart().startsWith("(")) {
+        cls = "tok-fn";
       }
       tokens.push([cls, word]);
       i = j;
       continue;
     }
 
-    // Multi-char operators (longest match first)
-    const threeChar = code.slice(i, i + 3);
-    const twoChar = code.slice(i, i + 2);
-
-    if (["<<=", ">>="].includes(threeChar)) {
-      tokens.push(["tok-op", threeChar]);
+    const three = code.slice(i, i + 3),
+      two = code.slice(i, i + 2);
+    if (["<<=", ">>="].includes(three)) {
+      tokens.push(["tok-op", three]);
       i += 3;
       continue;
     }
@@ -381,9 +430,9 @@ function tokenise(code) {
         "->",
         "<<",
         ">>",
-      ].includes(twoChar)
+      ].includes(two)
     ) {
-      tokens.push(["tok-op", twoChar]);
+      tokens.push(["tok-op", two]);
       i += 2;
       continue;
     }
@@ -420,8 +469,7 @@ function updateHighlight() {
 
 function updateLineNumbers(code) {
   const lines = (code.match(/\n/g) || []).length + 1;
-  const current = lineNumbers.children.length;
-  if (lines === current) {
+  if (lines === lineNumbers.children.length) {
     return;
   }
   lineNumbers.innerHTML = Array.from(
@@ -446,8 +494,8 @@ function syncScroll() {
 codeInput.addEventListener("keydown", (e) => {
   if (e.key === "Tab") {
     e.preventDefault();
-    const start = codeInput.selectionStart;
-    const end = codeInput.selectionEnd;
+    const start = codeInput.selectionStart,
+      end = codeInput.selectionEnd;
     codeInput.value =
       codeInput.value.slice(0, start) + "    " + codeInput.value.slice(end);
     codeInput.selectionStart = codeInput.selectionEnd = start + 4;
@@ -497,21 +545,23 @@ function clearOutput() {
 
 function appendLine(text, type = "stdout") {
   outputIdle.style.display = "none";
-  const lines = String(text).split("\n");
-  lines.forEach((content, i) => {
-    const row = document.createElement("div");
-    row.className = `output-line ${type}`;
-    row.style.animationDelay = i * 20 + "ms";
-    const prefix = document.createElement("span");
-    prefix.className = "line-prefix";
-    prefix.textContent = type === "stderr" ? "!" : type === "info" ? "#" : "›";
-    const span = document.createElement("span");
-    span.className = "line-content";
-    span.textContent = content;
-    row.appendChild(prefix);
-    row.appendChild(span);
-    outputBody.appendChild(row);
-  });
+  String(text)
+    .split("\n")
+    .forEach((content, i) => {
+      const row = document.createElement("div");
+      row.className = `output-line ${type}`;
+      row.style.animationDelay = i * 20 + "ms";
+      const prefix = document.createElement("span");
+      prefix.className = "line-prefix";
+      prefix.textContent =
+        type === "stderr" ? "!" : type === "info" ? "#" : "›";
+      const span = document.createElement("span");
+      span.className = "line-content";
+      span.textContent = content;
+      row.appendChild(prefix);
+      row.appendChild(span);
+      outputBody.appendChild(row);
+    });
   outputBody.scrollTop = outputBody.scrollHeight;
 }
 
@@ -523,13 +573,11 @@ async function runCode() {
   if (!code) {
     return;
   }
-
   runBtn.classList.add("loading");
   runBtn.querySelector("svg").innerHTML =
     '<circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-dasharray="20" stroke-dashoffset="20" style="animation:dash 0.8s linear infinite"/>';
   clearOutput();
   setStatus("run", "running…");
-
   const t0 = performance.now();
   try {
     const resp = await fetch("/run", {
@@ -539,7 +587,6 @@ async function runCode() {
     });
     const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
     execTimeEl.textContent = `${elapsed}s`;
-
     const data = await resp.json();
     if (data.stdout && data.stdout.trim()) {
       appendLine(data.stdout.trimEnd(), "stdout");
@@ -550,7 +597,6 @@ async function runCode() {
     if (!data.stdout && !data.stderr) {
       appendLine("(no output)", "info");
     }
-
     if (data.error) {
       appendLine(data.error, "stderr");
       setStatus("err", "error");
@@ -559,7 +605,7 @@ async function runCode() {
       setStatus("ok", `done in ${elapsed}s`);
       document.getElementById("statusDot").style.background = "var(--green)";
     }
-  } catch (err) {
+  } catch {
     appendLine(
       "Could not reach the Lotus server.\nMake sure lotus --playground is running.",
       "stderr",
