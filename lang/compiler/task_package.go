@@ -14,8 +14,6 @@ type taskState struct {
 	mu sync.Mutex
 }
 
-var globalTaskState = &taskState{}
-
 func taskPackage() *object.Package {
 	pkg := &object.Package{
 		Name:      "Task",

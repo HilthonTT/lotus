@@ -12,6 +12,7 @@ type ClassStatement struct {
 	Name       *Identifier
 	SuperClass *Identifier // nil if no superclass
 	Methods    []*FunctionLiteral
+	TypeParams []TypeParam
 }
 
 func (cs *ClassStatement) statementNode() {}

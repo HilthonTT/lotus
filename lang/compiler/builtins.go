@@ -189,6 +189,19 @@ var Builtins = []BuiltinDef{
 			return &object.Array{Elements: elems}
 		},
 	},
+	{
+		Name: "implements",
+		Fn: func(args ...object.Object) object.Object {
+			if len(args) != 2 {
+				return &object.Boolean{Value: false}
+			}
+			iface, ok := args[1].(*object.Interface)
+			if !ok {
+				return &object.Boolean{Value: false}
+			}
+			return &object.Boolean{Value: iface.Implements(args[0])}
+		},
+	},
 }
 
 func builtinIndex(name string) int {

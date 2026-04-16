@@ -7,11 +7,6 @@ import (
 	"strings"
 )
 
-const (
-	ENUM_DEF_OBJ     ObjectType = "ENUM_DEF"
-	ENUM_VARIANT_OBJ ObjectType = "ENUM_VARIANT"
-)
-
 // EnumVariantDef describes the fields of a variant (set at compile time).
 type EnumVariantDef struct {
 	Fields []string

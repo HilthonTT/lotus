@@ -245,6 +245,14 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseImportStatement()
 	case token.ENUM:
 		return p.parseEnumStatement()
+	case token.TRY:
+		return p.parseTryCatchStatement()
+	case token.DEFER:
+		return p.parseDeferStatement()
+	case token.THROW:
+		return p.parseThrowStatement()
+	case token.INTERFACE:
+		return p.parseInterfaceStatement()
 	default:
 		return p.parseExpressionOrAssignStatement()
 	}
@@ -400,6 +408,10 @@ func (p *Parser) parseClassStatement() *ast.ClassStatement {
 	}
 
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if p.peekTokenIs(token.LT) {
+		stmt.TypeParams = p.parseTypeParams()
+	}
 
 	if p.peekTokenIs(token.EXTENDS) {
 		p.nextToken() // consume 'extends'
@@ -875,6 +887,10 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		lit.Name = p.curToken.Literal
 	}
 
+	if p.peekTokenIs(token.LT) {
+		lit.TypeParams = p.parseTypeParams()
+	}
+
 	if !p.expectPeek(token.LPAREN) {
 		return nil
 	}
@@ -891,6 +907,7 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		return nil
 	}
 	lit.Body = p.parseBlockStatement()
+
 	return lit
 }
 
@@ -935,12 +952,40 @@ func (p *Parser) parseFunctionParameters() ([]*ast.Identifier, []*ast.TypeAnnota
 
 // parseOptionalTypeAnnot reads ': TypeName' if present, else returns nil.
 func (p *Parser) parseOptionalTypeAnnot() *ast.TypeAnnotation {
-	if p.peekTokenIs(token.COLON) {
-		p.nextToken() // consume ':'
-		p.nextToken() // move to type name
-		return &ast.TypeAnnotation{Name: p.curToken.Literal}
+	if !p.peekTokenIs(token.COLON) {
+		return nil
 	}
-	return nil
+	p.nextToken() // consume ':'
+	p.nextToken() // move to type name
+
+	// Handle fn(...) -> T function type annotations
+	if p.curTokenIs(token.FN) {
+		name := "fn"
+		// Consume (param, types, ...)
+		if p.peekTokenIs(token.LPAREN) {
+			p.nextToken() // consume (
+			depth := 1
+			for depth > 0 && !p.curTokenIs(token.EOF) {
+				p.nextToken()
+				if p.curTokenIs(token.LPAREN) {
+					depth++
+				}
+				if p.curTokenIs(token.RPAREN) {
+					depth--
+				}
+			}
+			name = "fn(...)"
+		}
+		// Consume optional -> ReturnType
+		if p.peekTokenIs(token.ARROW) {
+			p.nextToken() // ->
+			p.nextToken() // return type name
+			name = "fn(...) -> " + p.curToken.Literal
+		}
+		return &ast.TypeAnnotation{Name: name}
+	}
+
+	return &ast.TypeAnnotation{Name: p.curToken.Literal}
 }
 
 // isParamToken returns true if the current token is valid as a parameter name.
@@ -1014,4 +1059,162 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 		return nil
 	}
 	return list
+}
+
+// parseDeferStatement: defer someCall(args...)
+// The call is kept as-is; the compiler wraps it in a closure.
+func (p *Parser) parseDeferStatement() *ast.DeferStatement {
+	stmt := &ast.DeferStatement{Token: p.curToken}
+	p.nextToken()
+	stmt.Call = p.parseExpression(LOWEST)
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+	return stmt
+}
+
+// parseTryCatchStatement:
+//
+//	try { ... } catch err { ... }
+//	try { ... } catch { ... }       <- anonymous catch (no bindin
+func (p *Parser) parseTryCatchStatement() *ast.TryCatchStatement {
+	stmt := &ast.TryCatchStatement{Token: p.curToken}
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+	stmt.Try = p.parseBlockStatement()
+
+	if !p.expectPeek(token.CATCH) {
+		return nil
+	}
+
+	// Optional binding: catch err { ... }
+	if p.peekTokenIs(token.IDENT) {
+		p.nextToken()
+		stmt.CatchVar = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+	stmt.Catch = p.parseBlockStatement()
+
+	return stmt
+}
+
+// parseThrowStatement: throw "message"  or  throw ErrorValue
+func (p *Parser) parseThrowStatement() *ast.ThrowStatement {
+	stmt := &ast.ThrowStatement{Token: p.curToken}
+	p.nextToken()
+	stmt.Value = p.parseExpression(LOWEST)
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+	return stmt
+}
+
+// parseInterfaceStatement:
+//
+//	interface Drawable {
+//	    fn draw(self) -> string
+//	    fn area(self) -> float
+//	}
+func (p *Parser) parseInterfaceStatement() *ast.InterfaceStatement {
+	stmt := &ast.InterfaceStatement{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+	p.nextToken() // move past {
+
+	for !p.curTokenIs(token.RBRACE) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.FN) {
+			sig := p.parseInterfaceMethodSig()
+			if sig != nil {
+				stmt.Methods = append(stmt.Methods, sig)
+			}
+		}
+		p.nextToken()
+	}
+	return stmt
+}
+
+// parseInterfaceMethodSig parses one method signature inside an interface body.
+func (p *Parser) parseInterfaceMethodSig() *ast.InterfaceMethodSig {
+	// fn methodName(self, param: type, ...) -> returnType
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	sig := &ast.InterfaceMethodSig{Name: p.curToken.Literal}
+
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
+
+	// Parse params (we care about count and types, not names for interfaces)
+	paramCount := 0
+	for !p.peekTokenIs(token.RPAREN) && !p.peekTokenIs(token.EOF) {
+		p.nextToken()
+		if p.curTokenIs(token.SELF) {
+			// skip self
+		} else if p.curTokenIs(token.IDENT) {
+			paramCount++
+			// optional type annotation
+			if p.peekTokenIs(token.COLON) {
+				p.nextToken() // consume :
+				p.nextToken() // type name
+				sig.ParamTypes = append(sig.ParamTypes, &ast.TypeAnnotation{Name: p.curToken.Literal})
+			} else {
+				sig.ParamTypes = append(sig.ParamTypes, nil)
+			}
+		}
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+		}
+	}
+	sig.ParamCount = paramCount
+	if !p.expectPeek(token.RPAREN) {
+		return nil
+	}
+
+	// Optional return type
+	if p.peekTokenIs(token.ARROW) {
+		p.nextToken()
+		p.nextToken()
+		sig.ReturnType = &ast.TypeAnnotation{Name: p.curToken.Literal}
+	}
+
+	return sig
+}
+
+// parseTypeParams parses <T>, <T, U>, <T: Constraint> after a fn or class name.
+// The parser consumes the < ... > but the compiler ignores type params.
+func (p *Parser) parseTypeParams() []ast.TypeParam {
+	// curToken is '<'
+	p.nextToken() // move past <
+	var params []ast.TypeParam
+	for !p.curTokenIs(token.GT) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.IDENT) {
+			tp := ast.TypeParam{Name: p.curToken.Literal}
+			// optional constraint: T: Comparable
+			if p.peekTokenIs(token.COLON) {
+				p.nextToken()
+				p.nextToken()
+				tp.Constraint = p.curToken.Literal
+			}
+			params = append(params, tp)
+		}
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+		}
+		p.nextToken()
+	}
+	// curToken should now be '>'
+	return params
 }

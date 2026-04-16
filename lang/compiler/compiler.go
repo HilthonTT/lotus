@@ -823,6 +823,80 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 			c.setSymbol(sym)
 		}
+	case *ast.DeferStatement:
+		// Build an anonymous zero-param function literal that wraps the call
+		body := &ast.BlockStatement{
+			Statements: []ast.Statement{
+				&ast.ExpressionStatement{Expression: node.Call},
+			},
+		}
+		anonFn := &ast.FunctionLiteral{
+			Parameters: []*ast.Identifier{},
+			Body:       body,
+		}
+		if err := c.Compile(anonFn); err != nil {
+			return err
+		}
+		// At this point the closure is on the stack.
+		// OpDefer pops it and adds it to frame.deferred.
+		c.emit(code.OpDefer)
+	case *ast.ThrowStatement:
+		if err := c.Compile(node.Value); err != nil {
+			return err
+		}
+		c.emit(code.OpThrow)
+
+	case *ast.TryCatchStatement:
+		// Emit OpTryBegin with placeholder catch offset
+		tryBeginPos := c.emit(code.OpTryBegin, 9999)
+
+		// Compile the try body
+		if err := c.Compile(node.Try); err != nil {
+			return err
+		}
+
+		// Normal exit: remove catch handler and jump over catch block
+		c.emit(code.OpTryEnd)
+		skipCatchJump := c.emit(code.OpJump, 9999)
+
+		// Patch OpTryBegin to point here (catch handler start)
+		catchStart := len(c.currentInstructions())
+		c.replaceOperand(tryBeginPos, catchStart)
+
+		// Catch block: error string is on the stack
+		if node.CatchVar != nil {
+			// Bind the error string to the catch variable
+			sym := c.symbolTable.Define(node.CatchVar.Value, false)
+			c.setSymbol(sym)
+		} else {
+			// No binding — discard the error value
+			c.emit(code.OpPop)
+		}
+
+		if err := c.Compile(node.Catch); err != nil {
+			return err
+		}
+
+		// Patch the jump-over-catch
+		afterCatch := len(c.currentInstructions())
+		c.replaceOperand(skipCatchJump, afterCatch)
+	case *ast.InterfaceStatement:
+		sym := c.symbolTable.Define(node.Name.Value, false)
+		methods := make([]object.InterfaceMethodSpec, len(node.Methods))
+		for i, m := range node.Methods {
+			methods[i] = object.InterfaceMethodSpec{
+				Name:       m.Name,
+				ParamCount: m.ParamCount,
+			}
+			if m.ReturnType != nil {
+				methods[i].ReturnType = m.ReturnType.Name
+			}
+		}
+		iface := &object.Interface{Name: node.Name.Value, Methods: methods}
+		nameIdx := c.addConstant(&object.String{Value: node.Name.Value})
+		c.emit(code.OpConstant, c.addConstant(iface))
+		c.setSymbol(sym)
+		_ = nameIdx
 	}
 
 	return nil

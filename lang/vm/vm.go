@@ -45,6 +45,7 @@ type VM struct {
 	maxFramesUsed int
 	loader        ModuleLoader
 	moduleCache   map[string]*object.Module
+	catchStack    []catchEntry
 }
 
 // New initializes and returns a pointer to a VM.
@@ -217,7 +218,9 @@ func (vm *VM) Run() error {
 
 		case code.OpAdd, code.OpSub, code.OpMul, code.OpDiv, code.OpMod:
 			if err := vm.executeBinaryOperation(op); err != nil {
-				return err
+				if !vm.redirectToCatch(err) {
+					return err
+				}
 			}
 
 		case code.OpNegate:
@@ -388,7 +391,9 @@ func (vm *VM) Run() error {
 		// Foo(...) returns the newly-created instance rather than init's nil.
 		case code.OpReturn:
 			returnValue := vm.pop()
-			frame := vm.popFrame()
+			frame := vm.currentFrame() // get frame BEFORE popping
+			vm.runDeferred(frame)      // run deferred closures
+			vm.popFrame()              // now pop
 			if frame.isMethod {
 				vm.sp = frame.basePointer
 			} else {
@@ -405,7 +410,9 @@ func (vm *VM) Run() error {
 			}
 
 		case code.OpReturnNil:
-			frame := vm.popFrame()
+			frame := vm.currentFrame()
+			vm.runDeferred(frame) // run deferred closures
+			vm.popFrame()
 			if frame.isMethod {
 				vm.sp = frame.basePointer
 			} else {
@@ -567,6 +574,50 @@ func (vm *VM) Run() error {
 			if err := vm.push(&object.Integer{Value: ^i.Value}); err != nil {
 				return err
 			}
+
+		case code.OpDefer:
+			// Pop the closure and add it to the current frame's deferred list.
+			cl, ok := vm.pop().(*object.Closure)
+			if !ok {
+				return fmt.Errorf("defer: expected closure on stack")
+			}
+			vm.currentFrame().deferred = append(vm.currentFrame().deferred, cl)
+
+		case code.OpThrow:
+			val := vm.pop()
+			var msg string
+			switch v := val.(type) {
+			case *object.String:
+				msg = v.Value
+			case *object.LotusError:
+				msg = v.Message
+			default:
+				msg = val.Inspect()
+			}
+			throwErr := fmt.Errorf("%s", msg)
+			if !vm.redirectToCatch(throwErr) {
+				return throwErr
+			}
+
+		case code.OpTryBegin:
+			catchOffset := int(code.ReadUint16(ins[ip+1:]))
+			vm.currentFrame().ip += 2
+			vm.catchStack = append(vm.catchStack, catchEntry{
+				frameIndex: vm.framesIndex,
+				ip:         catchOffset,
+				sp:         vm.sp,
+			})
+
+		case code.OpTryEnd:
+			if len(vm.catchStack) > 0 {
+				vm.catchStack = vm.catchStack[:len(vm.catchStack)-1]
+			}
+
+		case code.OpDefineInterface:
+			// The interface object is already compiled as a constant and stored via
+			// OpConstant + OpSetGlobal by the compiler. This opcode is reserved for
+			// future use (e.g. runtime interface checks).
+			vm.currentFrame().ip += 2
 
 		default:
 			return fmt.Errorf("unknown opcode: %d", op)
@@ -795,7 +846,8 @@ func (vm *VM) callMethod(cl *object.Closure, numArgs int) error {
 		f.basePointer = basePointer
 		f.initInstance = nil
 		f.isMethod = true
-		f.constants = cl.Constants // <- propagate
+		f.constants = cl.Constants // propagate
+		f.deferred = nil
 		vm.framesIndex++
 	} else {
 		f := NewFrame(cl, basePointer)
@@ -1167,7 +1219,8 @@ func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
 		f.closure = cl
 		f.initInstance = nil
 		f.isMethod = false
-		f.constants = cl.Constants // ← propagate
+		f.constants = cl.Constants // propagate
+		f.deferred = nil
 		vm.framesIndex++
 		vm.sp = vm.sp - numArgs + cl.Fn.NumLocals
 	} else {
@@ -1208,4 +1261,37 @@ func (vm *VM) pushClosure(constIndex int, numFree int) error {
 		Free:      free,
 		Constants: vm.currentConstants(), // carry this pool into the closure
 	})
+}
+
+// redirectToCatch attempts to redirect execution to a registered catch handler.
+// Returns true if a handler was found and execution was redirected.
+// Returns false if the error should propagate normally.
+func (vm *VM) redirectToCatch(err error) bool {
+	if len(vm.catchStack) == 0 {
+		return false
+	}
+	entry := vm.catchStack[len(vm.catchStack)-1]
+	vm.catchStack = vm.catchStack[:len(vm.catchStack)-1]
+
+	// Unwind frames back to the try block's frame
+	vm.framesIndex = entry.frameIndex
+	vm.sp = entry.sp
+
+	// Push the error message as a string (the catch variable receives it)
+	vm.push(&object.LotusError{Message: err.Error()})
+
+	// Jump to catch handler (ip will be incremented at top of loop → entry.ip)
+	vm.currentFrame().ip = entry.ip - 1
+	return true
+}
+
+// runDeferred calls all deferred closures in the given frame in LIFO order.
+// Called just before OpReturn / OpReturnNil pops the frame.
+func (vm *VM) runDeferred(frame *Frame) {
+	for i := len(frame.deferred) - 1; i >= 0; i-- {
+		cl := frame.deferred[i]
+		// Use a fresh mini-VM so deferred calls don't corrupt the main stack
+		result := vm.callClosureSync(cl, []object.Object{})
+		_ = result
+	}
 }

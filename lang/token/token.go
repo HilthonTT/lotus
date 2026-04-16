@@ -76,22 +76,27 @@ const (
 	RBRACKET TokenType = "]"
 
 	// Keywords
-	FN       TokenType = "FN"
-	LET      TokenType = "LET"
-	MUT      TokenType = "MUT"
-	TRUE     TokenType = "TRUE"
-	FALSE    TokenType = "FALSE"
-	IF       TokenType = "IF"
-	ELSE     TokenType = "ELSE"
-	WHILE    TokenType = "WHILE"
-	FOR      TokenType = "FOR"
-	IN       TokenType = "IN"
-	RETURN   TokenType = "RETURN"
-	NIL      TokenType = "NIL"
-	BREAK    TokenType = "BREAK"
-	CONTINUE TokenType = "CONTINUE"
-	MATCH    TokenType = "MATCH"
-	ENUM     TokenType = "ENUM"
+	FN        TokenType = "FN"
+	LET       TokenType = "LET"
+	MUT       TokenType = "MUT"
+	TRUE      TokenType = "TRUE"
+	FALSE     TokenType = "FALSE"
+	IF        TokenType = "IF"
+	ELSE      TokenType = "ELSE"
+	WHILE     TokenType = "WHILE"
+	FOR       TokenType = "FOR"
+	IN        TokenType = "IN"
+	RETURN    TokenType = "RETURN"
+	NIL       TokenType = "NIL"
+	BREAK     TokenType = "BREAK"
+	CONTINUE  TokenType = "CONTINUE"
+	MATCH     TokenType = "MATCH"
+	ENUM      TokenType = "ENUM"
+	DEFER     TokenType = "DEFER"
+	TRY       TokenType = "TRY"
+	CATCH     TokenType = "CATCH"
+	THROW     TokenType = "THROW"
+	INTERFACE TokenType = "INTERFACE"
 
 	// OOP keywords
 	CLASS   TokenType = "CLASS"
@@ -107,29 +112,34 @@ const (
 )
 
 var keywords = map[string]TokenType{
-	"fn":       FN,
-	"let":      LET,
-	"mut":      MUT,
-	"true":     TRUE,
-	"false":    FALSE,
-	"if":       IF,
-	"else":     ELSE,
-	"while":    WHILE,
-	"for":      FOR,
-	"in":       IN,
-	"return":   RETURN,
-	"nil":      NIL,
-	"break":    BREAK,
-	"continue": CONTINUE,
-	"class":    CLASS,
-	"extends":  EXTENDS,
-	"self":     SELF,
-	"super":    SUPER,
-	"export":   EXPORT,
-	"import":   IMPORT,
-	"from":     FROM,
-	"match":    MATCH,
-	"enum":     ENUM,
+	"fn":        FN,
+	"let":       LET,
+	"mut":       MUT,
+	"true":      TRUE,
+	"false":     FALSE,
+	"if":        IF,
+	"else":      ELSE,
+	"while":     WHILE,
+	"for":       FOR,
+	"in":        IN,
+	"return":    RETURN,
+	"nil":       NIL,
+	"break":     BREAK,
+	"continue":  CONTINUE,
+	"class":     CLASS,
+	"extends":   EXTENDS,
+	"self":      SELF,
+	"super":     SUPER,
+	"export":    EXPORT,
+	"import":    IMPORT,
+	"from":      FROM,
+	"match":     MATCH,
+	"enum":      ENUM,
+	"defer":     DEFER,
+	"try":       TRY,
+	"catch":     CATCH,
+	"throw":     THROW,
+	"interface": INTERFACE,
 }
 
 func LookupIdentifier(identifier string) TokenType {

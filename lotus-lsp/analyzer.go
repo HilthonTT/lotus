@@ -53,6 +53,7 @@ func NewAnalyzer() *Analyzer {
 			"while", "for", "in", "return", "break", "continue",
 			"true", "false", "nil", "self", "super",
 			"import", "export", "from", "match", "enum",
+			"defer", "try", "catch", "throw", "interface",
 		},
 		typeNames: []string{
 			"int", "float", "string", "bool", "array", "map", "nil",
@@ -68,6 +69,7 @@ func NewAnalyzer() *Analyzer {
 			{"str", "str(value) -> string", "Converts a value to its string representation."},
 			{"int", "int(value) -> int", "Converts a value to an integer."},
 			{"range", "range([start,] end [,step]) -> array", "Returns an array of integers."},
+			{"implements", "implements(obj, iface) -> bool", "Returns true if obj structurally implements the given interface (has all required methods)."},
 		},
 		packages: map[string][]packageMember{
 			"Console": {
@@ -97,6 +99,10 @@ func NewAnalyzer() *Analyzer {
 				{"writeFile", "OS.writeFile(path, content) -> bool", "Writes a string to a file. Returns true on success."},
 				{"parseInt", "OS.parseInt(s) -> int | nil", "Parses a string to an integer."},
 				{"parseFloat", "OS.parseFloat(s) -> float | nil", "Parses a string to a float."},
+			},
+			"Http": {
+				{"handle", "Http.handle(pattern, fn(req) -> string)", "Registers a route handler."},
+				{"listen", "Http.listen(addr: string)", "Starts the HTTP server on the given address."},
 			},
 			"Task": {
 				{"spawn", "Task.spawn(fn())", "Runs a zero-argument Lotus closure in a new goroutine."},
@@ -181,7 +187,7 @@ func NewAnalyzer() *Analyzer {
 			"Json": {
 				{"stringify", "Json.stringify(value) -> string", "Converts a Lotus value to a JSON string."},
 				{"prettyPrint", "Json.prettyPrint(value) -> string", "Converts a Lotus value to indented JSON."},
-				{"parse", "Json.parse(str: string) -> value", "Parses a JSON string into a Lotus value (objects→Hash, arrays→Array)."},
+				{"parse", "Json.parse(str: string) -> value", "Parses a JSON string into a Lotus value."},
 				{"valid", "Json.valid(str: string) -> bool", "Returns true if the string is valid JSON."},
 				{"keys", "Json.keys(str: string) -> array", "Returns the top-level keys of a JSON object string."},
 				{"get", "Json.get(str: string, key: string) -> value", "Gets a top-level key from a JSON object string."},

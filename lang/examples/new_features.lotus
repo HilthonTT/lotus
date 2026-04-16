@@ -1,0 +1,234 @@
+// new_features.lotus — defer, try/catch, throw, interfaces, generics
+
+// ── Defer ─────────────────────────────────────────────────────────────────────
+fn withDefer() {
+    defer print("3 — deferred last")
+    defer print("2 — deferred second")
+    print("1 — runs first")
+    // Output order: 1, 2, 3
+}
+withDefer()
+
+fn readAndClean(name: string) -> string {
+    let data = OS.readFile(name) ?? "no data"
+    defer print("cleanup: closing " + name)
+    return data
+}
+let content = readAndClean("hello.txt")
+print("Content: " + content)
+
+// ── Try / Catch ───────────────────────────────────────────────────────────────
+fn safeDivide(a: int, b: int) -> int {
+    try {
+        if b == 0 {
+            throw "division by zero"
+        }
+        return a / b
+    } catch err {
+        print("Caught error: " + str(err))
+        return 0
+    }
+}
+
+print(str(safeDivide(10, 2)))   // 5
+print(str(safeDivide(10, 0)))   // Caught error: division by zero → 0
+
+// Nested try/catch
+fn riskyParse(s: string) -> int {
+    try {
+        let n = OS.parseInt(s)
+        if n == nil {
+            throw "not a number: " + s
+        }
+        return n
+    } catch err {
+        try {
+            // try a fallback parse
+            let f = OS.parseFloat(s)
+            if f == nil {
+                throw "not parseable"
+            }
+            return int(f)
+        } catch inner {
+            print("Inner catch: " + str(inner))
+            return -1
+        }
+    }
+}
+
+print(str(riskyParse("42")))     // 42
+print(str(riskyParse("3.14")))   // 3
+print(str(riskyParse("nope")))   // Inner catch → -1
+
+// ── Throw ─────────────────────────────────────────────────────────────────────
+fn validateAge(age: int) {
+    if age < 0 {
+        throw "age cannot be negative"
+    }
+    if age > 150 {
+        throw "age seems unrealistic: " + str(age)
+    }
+    print("Valid age: " + str(age))
+}
+
+try {
+    validateAge(25)
+    validateAge(-5)
+} catch err {
+    print("Validation failed: " + str(err))
+}
+
+// ── Interfaces ────────────────────────────────────────────────────────────────
+interface Stringer {
+    fn toString(self) -> string
+}
+
+interface Shape {
+    fn area(self) -> float
+    fn perimeter(self) -> float
+}
+
+class Circle {
+    fn init(self, radius: float) {
+        self.radius = radius
+    }
+    fn area(self) -> float {
+        return Math.pi() * self.radius * self.radius
+    }
+    fn perimeter(self) -> float {
+        return 2.0 * Math.pi() * self.radius
+    }
+    fn toString(self) -> string {
+        return "Circle(r=" + str(self.radius) + ")"
+    }
+}
+
+class Rectangle {
+    fn init(self, w: float, h: float) {
+        self.w = w
+        self.h = h
+    }
+    fn area(self) -> float {
+        return self.w * self.h
+    }
+    fn perimeter(self) -> float {
+        return 2.0 * (self.w + self.h)
+    }
+    fn toString(self) -> string {
+        return "Rect(" + str(self.w) + "x" + str(self.h) + ")"
+    }
+}
+
+let c = Circle(5.0)
+let r = Rectangle(4.0, 6.0)
+
+// Runtime interface check
+print(str(implements(c, Shape)))     // true
+print(str(implements(r, Shape)))     // true
+print(str(implements(c, Stringer)))  // true
+
+fn describeShape(s: Shape) {
+    print("Area:      " + str(s.area()))
+    print("Perimeter: " + str(s.perimeter()))
+}
+
+describeShape(c)
+describeShape(r)
+
+// ── Generics ──────────────────────────────────────────────────────────────────
+// Type parameters are parsed but erased at runtime — think TypeScript style.
+// They serve as documentation and enable better LSP hover info.
+
+fn identity<T>(x: T) -> T {
+    return x
+}
+
+fn first<T>(arr: array) -> T {
+    return arr[0]
+}
+
+fn last<T>(arr: array) -> T {
+    return arr[len(arr) - 1]
+}
+
+fn mapFn<T, U>(arr: array, f) -> array {
+    mut result = []
+    for item in arr {
+        result = push(result, f(item))
+    }
+    return result
+}
+
+print(str(identity(42)))
+print(str(identity("hello")))
+print(str(first([10, 20, 30])))
+print(str(last([10, 20, 30])))
+print(str(mapFn([1, 2, 3], fn(x) { x * x })))
+
+// Generic class
+class Stack<T> {
+    fn init(self) {
+        self.items = []
+    }
+    fn push(self, item: T) {
+        self.items = push(self.items, item)
+    }
+    fn pop(self) -> T {
+        let top = self.items[len(self.items) - 1]
+        self.items = Array.slice(self.items, 0, len(self.items) - 1)
+        return top
+    }
+    fn peek(self) -> T {
+        return self.items[len(self.items) - 1]
+    }
+    fn isEmpty(self) -> bool {
+        return len(self.items) == 0
+    }
+    fn size(self) -> int {
+        return len(self.items)
+    }
+}
+
+let stack = Stack()
+stack.push(1)
+stack.push(2)
+stack.push(3)
+
+print("Size: " + str(stack.size()))   // 3
+print("Peek: " + str(stack.peek()))   // 3
+print("Pop:  " + str(stack.pop()))    // 3
+print("Size: " + str(stack.size()))   // 2
+
+// ── Combining features ────────────────────────────────────────────────────────
+fn safeFirst<T>(arr: array) -> T {
+    try {
+        if len(arr) == 0 {
+            throw "array is empty"
+        }
+        return arr[0]
+    } catch err {
+        print("safeFirst error: " + str(err))
+        return nil
+    }
+}
+
+print(str(safeFirst([42, 43, 44])))  // 42
+print(str(safeFirst([])))            // safeFirst error: array is empty → nil
+
+// Defer with try/catch
+fn processFile(path: string) {
+    defer print("Done processing: " + path)
+
+    try {
+        let data = OS.readFile(path)
+        if data == nil {
+            throw "file not found: " + path
+        }
+        print("Read " + str(String.len(data)) + " chars from " + path)
+    } catch err {
+        print("Error: " + str(err))
+    }
+}
+
+processFile("hello.txt")
+processFile("nonexistent.txt")

@@ -13,6 +13,7 @@ type FunctionLiteral struct {
 	Body       *BlockStatement
 	ParamTypes []*TypeAnnotation // parallel to Parameters, may be nil entries
 	ReturnType *TypeAnnotation   // optional: -> int
+	TypeParams []TypeParam
 }
 
 func (e *FunctionLiteral) expressionNode() {}

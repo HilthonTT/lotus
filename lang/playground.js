@@ -243,6 +243,80 @@ let extra   = Json.stringify({"region": "Europe"})
 let merged  = Json.merge(updated, extra)
 print("Keys: " + str(Json.keys(merged)))
 print("Merged: " + Json.prettyPrint(Json.parse(merged)))`,
+  errorHandling: `// Defer, Try/Catch, Throw & Interfaces
+ 
+// ── Defer (LIFO) ─────────────────────────
+fn withDefer() {
+    defer print("3 — runs last")
+    defer print("2 — runs second")
+    print("1 — runs first")
+}
+withDefer()
+ 
+// ── Try / Catch ───────────────────────────
+fn safeDivide(a: int, b: int) -> int {
+    try {
+        if b == 0 { throw "division by zero" }
+        return a / b
+    } catch err {
+        print("Caught: " + str(err))
+        return 0
+    }
+}
+print(str(safeDivide(10, 2)))
+print(str(safeDivide(10, 0)))
+ 
+// ── Interfaces ────────────────────────────
+interface Shape {
+    fn area(self) -> float
+    fn perimeter(self) -> float
+}
+ 
+class Circle {
+    fn init(self, r: float) { self.r = r }
+    fn area(self) -> float { return Math.pi() * self.r * self.r }
+    fn perimeter(self) -> float { return 2.0 * Math.pi() * self.r }
+}
+ 
+class Rect {
+    fn init(self, w: float, h: float) { self.w = w  self.h = h }
+    fn area(self) -> float { return self.w * self.h }
+    fn perimeter(self) -> float { return 2.0 * (self.w + self.h) }
+}
+ 
+let c = Circle(5.0)
+let r = Rect(4.0, 6.0)
+ 
+print("Circle implements Shape: " + str(implements(c, Shape)))
+print("Rect implements Shape:   " + str(implements(r, Shape)))
+print("Circle area: " + str(c.area()))
+print("Rect area:   " + str(r.area()))
+ 
+// ── Generics (type-erased) ────────────────
+fn identity<T>(x: T) -> T { return x }
+fn first<T>(arr: array) -> T { return arr[0] }
+ 
+print(str(identity(42)))
+print(str(first(["a", "b", "c"])))
+ 
+class Stack<T> {
+    fn init(self) { self.items = [] }
+    fn push(self, v) { self.items = push(self.items, v) }
+    fn pop(self) {
+        let top = self.items[len(self.items) - 1]
+        self.items = Array.slice(self.items, 0, len(self.items) - 1)
+        return top
+    }
+    fn size(self) -> int { return len(self.items) }
+}
+ 
+let stack = Stack()
+stack.push(10)
+stack.push(20)
+stack.push(30)
+print("Size: " + str(stack.size()))
+print("Pop:  " + str(stack.pop()))
+print("Size: " + str(stack.size()))`,
 };
 
 // ── Token sets ──────────────────────────────────────────────
@@ -259,8 +333,20 @@ const KEYWORDS_CTRL = new Set([
   "export",
   "from",
   "match",
+  "try",
+  "catch",
+  "throw",
+  "defer",
 ]);
-const KEYWORDS_DECL = new Set(["let", "mut", "fn", "class", "extends", "enum"]);
+const KEYWORDS_DECL = new Set([
+  "let",
+  "mut",
+  "fn",
+  "class",
+  "extends",
+  "enum",
+  "interface",
+]);
 const KEYWORDS_VAL = new Set(["true", "false", "nil"]);
 const SELF_SUPER = new Set(["self", "super"]);
 const BUILTINS = new Set([
@@ -274,19 +360,19 @@ const BUILTINS = new Set([
   "str",
   "int",
   "range",
+  "implements",
 ]);
 const PACKAGES = new Set([
   "Console",
   "Math",
   "OS",
-  "Http",
   "Task",
   "String",
   "Array",
   "Time",
   "Json",
 ]);
-const TYPES = new Set(["int", "float", "string", "bool", "array", "map"]);
+const TYPES = new Set(["int", "float", "string", "bool", "array", "map", "fn"]);
 
 // ── Syntax highlighter ──────────────────────────────────────
 function highlight(code) {
@@ -410,6 +496,7 @@ function tokenise(code) {
 
     const three = code.slice(i, i + 3),
       two = code.slice(i, i + 2);
+
     if (["<<=", ">>="].includes(three)) {
       tokens.push(["tok-op", three]);
       i += 3;
@@ -513,10 +600,13 @@ codeInput.addEventListener("click", updateCursor);
 editorScroll.addEventListener("scroll", syncScroll);
 
 function resizeTextarea() {
+  // Reset BOTH so scrollHeight can shrink
+  editorInner.style.height = "auto";
   codeInput.style.height = "auto";
   const minH = editorScroll.clientHeight;
-  codeInput.style.height = Math.max(minH, codeInput.scrollHeight) + "px";
-  editorInner.style.height = codeInput.style.height;
+  const newH = Math.max(minH, codeInput.scrollHeight) + "px";
+  codeInput.style.height = newH;
+  editorInner.style.height = newH;
 }
 const ro = new ResizeObserver(resizeTextarea);
 ro.observe(editorScroll);
@@ -624,9 +714,10 @@ document.getElementById("clearBtn").addEventListener("click", clearOutput);
 // ── Examples ────────────────────────────────────────────────
 document.querySelectorAll(".example-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    const code = EXAMPLES[btn.dataset.example];
+    const code = EXAMPLES[btn.dataset.example].trim();
     if (code) {
       codeInput.value = code;
+      editorScroll.scrollTop = 0;
       updateHighlight();
       resizeTextarea();
       clearOutput();

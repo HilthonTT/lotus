@@ -215,6 +215,7 @@ header {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  height: 100%;
 }
 
 .line-numbers div {
@@ -236,24 +237,29 @@ header {
 }
 
 /* Highlight layer sits behind textarea */
+.code-input,
 .highlight-layer {
-  position: absolute;
-  inset: 0;
-  padding: 16px;
   font-family: "DM Mono", monospace;
   font-size: 13px;
-  line-height: 1.7;
-  white-space: pre;
-  pointer-events: none;
-  word-break: break-all;
+  line-height: 1.7; /* ← change from 1.6 to 1.7 */
+  padding: 16px;
+  letter-spacing: 0;
+  tab-size: 4;
+  -moz-tab-size: 4;
+}
+
+.line-numbers-clip {
   overflow: hidden;
+  height: 100%;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
 }
 
 .code-input {
   position: relative;
   display: block;
   width: 100%;
-  min-height: 100%;
   padding: 16px;
   background: transparent;
   border: none;
@@ -266,7 +272,6 @@ header {
   caret-color: var(--accent);
   white-space: pre;
   overflow: hidden;
-  spellcheck: false;
   tab-size: 4;
 }
 

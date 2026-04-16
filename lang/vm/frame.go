@@ -22,6 +22,7 @@ type Frame struct {
 	initInstance *object.Instance // non-nil when this frame is an __init__ call
 	isMethod     bool             // if true, OpReturn uses sp=basePointer (not basePointer-1)
 	constants    []object.Object  // frame-local constants pool (nil = use vm.constants)
+	deferred     []*object.Closure
 }
 
 // Instructions returns the frame's function's instructions
@@ -38,4 +39,10 @@ func NewFrame(cl *object.Closure, basePointer int) *Frame {
 		basePointer: basePointer, // The pointer that points to the bottom of the stack of the current call frame. (Sometimes called "FramePointer")
 		constants:   cl.Constants,
 	}
+}
+
+type catchEntry struct {
+	frameIndex int
+	ip         int
+	sp         int
 }

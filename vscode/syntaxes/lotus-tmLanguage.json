@@ -11,7 +11,9 @@
     { "include": "#constants" },
     { "include": "#keywords-control" },
     { "include": "#keywords-declaration" },
+    { "include": "#keywords-error" },
     { "include": "#enum-declaration" },
+    { "include": "#interface-declaration" },
     { "include": "#class-declaration" },
     { "include": "#function-declaration" },
     { "include": "#return-type" },
@@ -103,6 +105,43 @@
       "name": "keyword.declaration.lotus",
       "match": "\\b(let|mut|fn|extends)\\b"
     },
+    "keywords-error": {
+      "comment": "Error handling and defer keywords",
+      "patterns": [
+        {
+          "name": "keyword.control.exception.lotus",
+          "match": "\\b(try|catch|throw)\\b"
+        },
+        {
+          "name": "keyword.control.defer.lotus",
+          "match": "\\bdefer\\b"
+        },
+        {
+          "name": "keyword.declaration.lotus",
+          "match": "\\b(enum|interface)\\b"
+        }
+      ]
+    },
+    "interface-declaration": {
+      "begin": "\\b(interface)\\s+([A-Z][a-zA-Z0-9_]*)",
+      "end": "\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.lotus" },
+        "2": { "name": "entity.name.type.interface.lotus" }
+      },
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "keyword.declaration.lotus" },
+            "2": { "name": "entity.name.function.lotus" }
+          }
+        },
+        { "include": "#type-annotation" },
+        { "include": "#return-type" },
+        { "include": "#self-super" }
+      ]
+    },
     "enum-declaration": {
       "begin": "\\b(enum)\\s+([A-Z][a-zA-Z0-9_]*)",
       "end": "\\}",
@@ -126,7 +165,7 @@
       ]
     },
     "class-declaration": {
-      "match": "\\b(class)\\s+([A-Z][a-zA-Z0-9_]*)(?:\\s+(extends)\\s+([A-Z][a-zA-Z0-9_]*))?",
+      "match": "\\b(class)\\s+([A-Z][a-zA-Z0-9_]*)(?:<[^>]*>)?(?:\\s+(extends)\\s+([A-Z][a-zA-Z0-9_]*))?",
       "captures": {
         "1": { "name": "keyword.declaration.lotus" },
         "2": { "name": "entity.name.type.class.lotus" },
@@ -135,21 +174,21 @@
       }
     },
     "function-declaration": {
-      "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?:<[^>]*>)?\\s*(?=\\()",
       "captures": {
         "1": { "name": "keyword.declaration.lotus" },
         "2": { "name": "entity.name.function.lotus" }
       }
     },
     "type-annotation": {
-      "match": "(:)\\s*(int|float|string|bool|array|map|[A-Z][a-zA-Z0-9_]*)",
+      "match": "(:)\\s*(int|float|string|bool|array|map|fn|[A-Z][a-zA-Z0-9_]*)",
       "captures": {
         "1": { "name": "punctuation.separator.type.lotus" },
         "2": { "name": "entity.name.type.annotation.lotus" }
       }
     },
     "return-type": {
-      "match": "(->)\\s*(int|float|string|bool|array|map|[A-Z][a-zA-Z0-9_]*)",
+      "match": "(->)\\s*(int|float|string|bool|array|map|fn|[A-Z][a-zA-Z0-9_]*)",
       "captures": {
         "1": { "name": "keyword.operator.arrow.lotus" },
         "2": { "name": "entity.name.type.annotation.lotus" }
@@ -161,7 +200,7 @@
     },
     "packages": {
       "name": "support.class.lotus",
-      "match": "\\b(Console|Math|OS|Task|String|Array|Time|Json)\\b(?=[.?])"
+      "match": "\\b(Console|Math|OS|Http|Task|String|Array|Time|Json)\\b(?=[.?])"
     },
     "class-instantiation": {
       "match": "\\b([A-Z][a-zA-Z0-9_]*)\\s*(?=\\()",
