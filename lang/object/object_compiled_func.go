@@ -8,23 +8,29 @@ import (
 	"github.com/hilthontt/lotus/code"
 )
 
+// CompiledFunction holds the bytecode of a compiled function.
 type CompiledFunction struct {
 	Instructions code.Instructions
 	NumLocals    int
 	NumParams    int
 	Name         string
 	IsVariadic   bool
+	Lines        code.LineTable // maps bytecode offsets -> source lines
 }
 
-func (o *CompiledFunction) Type() ObjectType {
+func (cf *CompiledFunction) Type() ObjectType {
 	return "COMPILED_FUNCTION"
 }
 
-func (o *CompiledFunction) Inspect() string {
-	return fmt.Sprintf("fn<%s>", o.Name)
+func (cf *CompiledFunction) Inspect() string {
+	name := cf.Name
+	if name == "" {
+		name = "<anonymous>"
+	}
+	return fmt.Sprintf("<fn %s>", name)
 }
 
-func (o *CompiledFunction) InvokeMethod(method string, env Environment, args ...Object) Object {
+func (cf *CompiledFunction) InvokeMethod(method string, env Environment, args ...Object) Object {
 	if method == "methods" {
 		static := []string{"methods"}
 		dynamic := env.Names("function.")
@@ -46,6 +52,6 @@ func (o *CompiledFunction) InvokeMethod(method string, env Environment, args ...
 	return nil
 }
 
-func (o *CompiledFunction) ToInterface() any {
+func (cf *CompiledFunction) ToInterface() any {
 	return "<COMPILED_FUNCTION>"
 }

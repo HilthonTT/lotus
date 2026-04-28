@@ -12,6 +12,7 @@ type Bytecode struct {
 	Instructions    code.Instructions
 	Constants       []object.Object
 	ExportedSymbols map[string]int
+	Lines           code.LineTable // top-level line table
 }
 
 type EmittedInstruction struct {
@@ -19,10 +20,37 @@ type EmittedInstruction struct {
 	Position int
 }
 
+// LineTracker builds a LineTable as instructions are emitted.
+type LineTracker struct {
+	entries []code.LineEntry
+	curLine int
+}
+
+func (lt *LineTracker) Emit(offset, byteCount, line int) {
+	if line <= 0 {
+		line = lt.curLine
+	}
+	lt.curLine = line
+	if len(lt.entries) > 0 {
+		last := &lt.entries[len(lt.entries)-1]
+		if last.Line == line && last.Start+last.Count == offset {
+			last.Count += byteCount
+			return
+		}
+	}
+	lt.entries = append(lt.entries, code.LineEntry{Start: offset, Count: byteCount, Line: line})
+}
+
+func (lt *LineTracker) Table() code.LineTable {
+	return code.LineTable(lt.entries)
+}
+
 type CompilationScope struct {
 	instructions        code.Instructions
 	lastInstruction     EmittedInstruction
 	previousInstruction EmittedInstruction
+	lineTracker         LineTracker
+	currentLine         int
 }
 
 type Compiler struct {
@@ -39,11 +67,7 @@ type Compiler struct {
 }
 
 func New() *Compiler {
-	mainScope := CompilationScope{
-		instructions:        code.Instructions{},
-		lastInstruction:     EmittedInstruction{},
-		previousInstruction: EmittedInstruction{},
-	}
+	mainScope := CompilationScope{}
 	symbolTable := NewSymbolTable()
 	for i, v := range Builtins {
 		symbolTable.DefineBuiltin(i, v.Name)
@@ -60,11 +84,24 @@ func New() *Compiler {
 	}
 }
 
+func NewWithState(s *SymbolTable, constants []object.Object) *Compiler {
+	c := New()
+	c.symbolTable = s
+	c.constants = constants
+	return c
+}
+
+// ExportSymbolTable returns the symbol table for REPL persistence.
+func (c *Compiler) ExportSymbolTable() *SymbolTable {
+	return c.symbolTable
+}
+
 func (c *Compiler) Bytecode() *Bytecode {
 	return &Bytecode{
 		Instructions:    c.currentInstructions(),
 		Constants:       c.constants,
 		ExportedSymbols: c.exportedSymbols,
+		Lines:           c.scopes[0].lineTracker.Table(),
 	}
 }
 
@@ -74,6 +111,12 @@ func (c *Compiler) PublicResolve(name string) (Symbol, bool) {
 
 func (c *Compiler) currentInstructions() code.Instructions {
 	return c.scopes[c.scopeIndex].instructions
+}
+
+func (c *Compiler) setLineInt(line int) {
+	if line > 0 {
+		c.scopes[c.scopeIndex].currentLine = line
+	}
 }
 
 func (c *Compiler) loadSymbol(s Symbol) {
@@ -106,26 +149,24 @@ func (c *Compiler) emit(op code.Opcode, operands ...int) int {
 	ins := code.Make(op, operands...)
 	pos := c.addInstruction(ins)
 	c.setLastInstruction(op, pos)
+	// Record line info
+	c.scopes[c.scopeIndex].lineTracker.Emit(pos, len(ins), c.scopes[c.scopeIndex].currentLine)
 	return pos
 }
 
 func (c *Compiler) enterScope() {
-	scope := CompilationScope{
-		instructions:        code.Instructions{},
-		lastInstruction:     EmittedInstruction{},
-		previousInstruction: EmittedInstruction{},
-	}
-	c.scopes = append(c.scopes, scope)
+	c.scopes = append(c.scopes, CompilationScope{})
 	c.scopeIndex++
 	c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
 }
 
-func (c *Compiler) leaveScope() code.Instructions {
+func (c *Compiler) leaveScope() (code.Instructions, code.LineTable) {
 	instructions := c.currentInstructions()
+	lines := c.scopes[c.scopeIndex].lineTracker.Table()
 	c.scopes = c.scopes[:len(c.scopes)-1]
 	c.scopeIndex--
 	c.symbolTable = c.symbolTable.Outer
-	return instructions
+	return instructions, lines
 }
 
 func (c *Compiler) Compile(node ast.Node) error {
@@ -138,12 +179,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.ExpressionStatement:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Expression); err != nil {
 			return err
 		}
 		c.emit(code.OpPop)
 
 	case *ast.LetStatement:
+		c.setLineInt(node.Token.Line)
 		sym := c.symbolTable.Define(node.Name.Value, node.Mutable)
 		if err := c.Compile(node.Value); err != nil {
 			return err
@@ -155,6 +198,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.AssignStatement:
+		c.setLineInt(node.Token.Line)
 		sym, ok := c.symbolTable.Resolve(node.Name.Value)
 		if !ok {
 			return fmt.Errorf("undefined variable: %s", node.Name.Value)
@@ -173,6 +217,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.IndexAssignStatement:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Left); err != nil {
 			return err
 		}
@@ -185,11 +230,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpIndexSet)
 
 	case *ast.ClassStatement:
-		if err := c.compileClass(node); err != nil {
-			return err
-		}
+		c.setLineInt(node.Token.Line)
+		return c.compileClass(node)
 
 	case *ast.FieldAssignStatement:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Left); err != nil {
 			return err
 		}
@@ -200,6 +245,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpSetField, nameIdx)
 
 	case *ast.ReturnStatement:
+		c.setLineInt(node.Token.Line)
 		if node.ReturnValue != nil {
 			if err := c.Compile(node.ReturnValue); err != nil {
 				return err
@@ -217,6 +263,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.WhileStatement:
+		c.setLineInt(node.Token.Line)
 		loopStart := len(c.currentInstructions())
 		c.loopStarts = append(c.loopStarts, loopStart)
 		c.breakPos = append(c.breakPos, []int{})
@@ -237,6 +284,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.breakPos = c.breakPos[:len(c.breakPos)-1]
 
 	case *ast.ForStatement:
+		c.setLineInt(node.Token.Line)
 		iterSym := c.symbolTable.Define("__iter__", true)
 		counterSym := c.symbolTable.Define("__counter__", true)
 		elemSym := c.symbolTable.Define(node.Variable.Value, true)
@@ -276,6 +324,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.breakPos = c.breakPos[:len(c.breakPos)-1]
 
 	case *ast.ForIndexStatement:
+		c.setLineInt(node.Token.Line)
 		return c.compileForIndex(node)
 
 	case *ast.BreakStatement:
@@ -290,15 +339,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.IntegerLiteral:
+		c.setLineInt(node.Token.Line)
 		c.emit(code.OpConstant, c.addConstant(&object.Integer{Value: node.Value}))
 
 	case *ast.FloatLiteral:
+		c.setLineInt(node.Token.Line)
 		c.emit(code.OpConstant, c.addConstant(&object.Float{Value: node.Value}))
 
 	case *ast.StringLiteral:
+		c.setLineInt(node.Token.Line)
 		c.emit(code.OpConstant, c.addConstant(&object.String{Value: node.Value}))
 
 	case *ast.BooleanLiteral:
+		c.setLineInt(node.Token.Line)
 		if node.Value {
 			c.emit(code.OpTrue)
 		} else {
@@ -306,9 +359,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.NilLiteral:
+		c.setLineInt(node.Token.Line)
 		c.emit(code.OpNil)
 
 	case *ast.Identifier:
+		c.setLineInt(node.Token.Line)
 		sym, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {
 			return fmt.Errorf("undefined variable: %s", node.Value)
@@ -316,6 +371,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.loadSymbol(sym)
 
 	case *ast.SelfExpression:
+		c.setLineInt(node.Token.Line)
 		sym, ok := c.symbolTable.Resolve("self")
 		if !ok {
 			return fmt.Errorf("'self' used outside of a method")
@@ -323,12 +379,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.loadSymbol(sym)
 
 	case *ast.SuperExpression:
+		c.setLineInt(node.Token.Line)
 		if !c.inClass {
 			return fmt.Errorf("'super' used outside of a class method")
 		}
 		c.emit(code.OpGetSuper)
 
 	case *ast.FieldAccessExpression:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Left); err != nil {
 			return err
 		}
@@ -336,6 +394,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpGetField, nameIdx)
 
 	case *ast.PrefixExpression:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Right); err != nil {
 			return err
 		}
@@ -351,6 +410,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.PostfixExpression:
+		c.setLineInt(node.Token.Line)
 		symbol, ok := c.symbolTable.Resolve(node.TokenLiteral())
 		if !ok {
 			return fmt.Errorf("undefined variable %s", node.TokenLiteral())
@@ -385,6 +445,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.InfixExpression:
+		c.setLineInt(node.Token.Line)
 		if node.Operator == "<" {
 			if err := c.Compile(node.Right); err != nil {
 				return err
@@ -483,6 +544,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.IfExpression:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Condition); err != nil {
 			return err
 		}
@@ -512,6 +574,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.replaceOperand(endJump, len(c.currentInstructions()))
 
 	case *ast.TernaryExpression:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Condition); err != nil {
 			return err
 		}
@@ -533,25 +596,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.replaceOperand(endJump, len(c.currentInstructions()))
 
 	case *ast.FunctionLiteral:
+		c.setLineInt(node.Token.Line)
 		var outerSym *Symbol
 		if node.Name != "" {
 			s := c.symbolTable.Define(node.Name, false)
 			outerSym = &s
 		}
 		c.enterScope()
-		isVariadic := false
-		for i, p := range node.Parameters {
-			isLast := i == len(node.Parameters)-1
-			if isLast && node.IsVariadic {
-				// Mark as variadic — VM will pack extra args into array
-				c.symbolTable.Define(p.Value, false)
-				isVariadic = true
-			} else {
-				c.symbolTable.Define(p.Value, false)
-			}
+		for _, p := range node.Parameters {
+			c.symbolTable.Define(p.Value, false)
 		}
-		_ = isVariadic // VM reads NumParams and IsVariadic from CompiledFunction
-
 		if err := c.Compile(node.Body); err != nil {
 			return err
 		}
@@ -564,7 +618,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		freeSymbols := c.symbolTable.FreeSymbols
 		numLocals := c.symbolTable.NumDefinitions
-		instructions := c.leaveScope()
+		instructions, lines := c.leaveScope()
 		for _, s := range freeSymbols {
 			c.loadSymbol(s)
 		}
@@ -574,6 +628,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			NumParams:    len(node.Parameters),
 			Name:         node.Name,
 			IsVariadic:   node.IsVariadic,
+			Lines:        lines,
 		}
 		fnIdx := c.addConstant(fn)
 		c.emit(code.OpClosure, fnIdx, len(freeSymbols))
@@ -588,11 +643,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.SpreadExpression:
-		// Standalone spread — compile the value (spread resolution is at call site)
 		return c.Compile(node.Value)
 
 	case *ast.CallExpression:
-		// Check for spread args
+		c.setLineInt(node.Token.Line)
 		hasSpread := false
 		for _, a := range node.Arguments {
 			if _, ok := a.(*ast.SpreadExpression); ok {
@@ -600,7 +654,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 				break
 			}
 		}
-
 		if hasSpread {
 			if err := c.Compile(node.Function); err != nil {
 				return err
@@ -620,8 +673,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(code.OpSpreadCall, len(node.Arguments))
 			return nil
 		}
-
-		// Method call: obj.method(args) or super.method(args)
 		if fieldAccess, ok := node.Function.(*ast.FieldAccessExpression); ok {
 			if _, isSuper := fieldAccess.Left.(*ast.SuperExpression); isSuper {
 				if !c.inClass {
@@ -642,8 +693,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(code.OpInvokeMethod, nameIdx, len(node.Arguments))
 			return nil
 		}
-
-		// Regular call
 		if err := c.Compile(node.Function); err != nil {
 			return err
 		}
@@ -655,7 +704,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpCall, len(node.Arguments))
 
 	case *ast.ArrayLiteral:
-		// Check for spread elements in array literals: [...a, ...b]
 		hasSpread := false
 		for _, el := range node.Elements {
 			if _, ok := el.(*ast.SpreadExpression); ok {
@@ -694,14 +742,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpIndex)
 
 	case *ast.ExportStatement:
-		if err := c.compileExport(node); err != nil {
-			return err
-		}
+		return c.compileExport(node)
 
 	case *ast.ImportStatement:
-		if err := c.compileImport(node); err != nil {
-			return err
-		}
+		return c.compileImport(node)
 
 	case *ast.OptionalFieldAccess:
 		if err := c.Compile(node.Left); err != nil {
@@ -806,6 +850,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpDefer)
 
 	case *ast.ThrowStatement:
+		c.setLineInt(node.Token.Line)
 		if err := c.Compile(node.Value); err != nil {
 			return err
 		}
@@ -840,11 +885,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 				methods[i].ReturnType = m.ReturnType.Name
 			}
 		}
-		iface := &object.Interface{Name: node.Name.Value, Methods: methods}
-		c.emit(code.OpConstant, c.addConstant(iface))
+		c.emit(code.OpConstant, c.addConstant(&object.Interface{Name: node.Name.Value, Methods: methods}))
 		c.setSymbol(sym)
 
 	case *ast.CompoundAssignStatement:
+		c.setLineInt(node.Token.Line)
 		switch target := node.Name.(type) {
 		case *ast.Identifier:
 			sym, ok := c.symbolTable.Resolve(target.Value)
@@ -938,22 +983,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 	return nil
 }
 
-// compileSpreadArray handles [...a, b, ...c] array literals.
-// Builds the array by concatenating segments using Array.flat.
 func (c *Compiler) compileSpreadArray(elements []ast.Expression) error {
 	for _, el := range elements {
 		if spread, ok := el.(*ast.SpreadExpression); ok {
 			if err := c.Compile(spread.Value); err != nil {
 				return err
 			}
-			c.emit(code.OpSpread) // marks as SpreadValue
+			c.emit(code.OpSpread)
 		} else {
 			if err := c.Compile(el); err != nil {
 				return err
 			}
 		}
 	}
-	// OpArray will see SpreadValues and flatten them in buildArray
 	c.emit(code.OpArray, len(elements))
 	return nil
 }
@@ -1050,7 +1092,7 @@ func (c *Compiler) compileMethod(method *ast.FunctionLiteral) error {
 	}
 	freeSymbols := c.symbolTable.FreeSymbols
 	numLocals := c.symbolTable.NumDefinitions
-	instructions := c.leaveScope()
+	instructions, lines := c.leaveScope()
 	for _, s := range freeSymbols {
 		c.loadSymbol(s)
 	}
@@ -1059,9 +1101,100 @@ func (c *Compiler) compileMethod(method *ast.FunctionLiteral) error {
 		NumLocals:    numLocals,
 		NumParams:    len(method.Parameters),
 		Name:         method.Name,
+		Lines:        lines,
 	}
 	fnIdx := c.addConstant(fn)
 	c.emit(code.OpClosure, fnIdx, len(freeSymbols))
+	return nil
+}
+
+func (c *Compiler) compileCompoundIndex(node *ast.CompoundAssignStatement, target *ast.IndexExpression) error {
+	if err := c.Compile(target.Left); err != nil {
+		return err
+	}
+	if err := c.Compile(target.Index); err != nil {
+		return err
+	}
+	c.emit(code.OpIndex)
+	if err := c.Compile(node.Value); err != nil {
+		return err
+	}
+	c.emitCompoundOp(node.Operator)
+	resultSym := c.symbolTable.Define("__ci_result__", true)
+	c.setSymbol(resultSym)
+	if err := c.Compile(target.Left); err != nil {
+		return err
+	}
+	if err := c.Compile(target.Index); err != nil {
+		return err
+	}
+	c.loadSymbol(resultSym)
+	c.emit(code.OpIndexSet)
+	return nil
+}
+
+func (c *Compiler) compileCompoundField(node *ast.CompoundAssignStatement, target *ast.FieldAccessExpression) error {
+	if err := c.Compile(target.Left); err != nil {
+		return err
+	}
+	nameIdx := c.addConstant(&object.String{Value: target.Field.Value})
+	c.emit(code.OpGetField, nameIdx)
+	if err := c.Compile(node.Value); err != nil {
+		return err
+	}
+	c.emitCompoundOp(node.Operator)
+	resultSym := c.symbolTable.Define("__cf_result__", true)
+	c.setSymbol(resultSym)
+	if err := c.Compile(target.Left); err != nil {
+		return err
+	}
+	c.loadSymbol(resultSym)
+	nameIdx2 := c.addConstant(&object.String{Value: target.Field.Value})
+	c.emit(code.OpSetField, nameIdx2)
+	return nil
+}
+
+func (c *Compiler) compileForIndex(node *ast.ForIndexStatement) error {
+	iterSym := c.symbolTable.Define("__fi_iter__", true)
+	counterSym := c.symbolTable.Define("__fi_counter__", true)
+	elemSym := c.symbolTable.Define(node.Variable.Value, true)
+	indexSym := c.symbolTable.Define(node.Index.Value, true)
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	c.setSymbol(iterSym)
+	c.emit(code.OpConstant, c.addConstant(&object.Integer{Value: 0}))
+	c.setSymbol(counterSym)
+	loopStart := len(c.currentInstructions())
+	c.loopStarts = append(c.loopStarts, loopStart)
+	c.breakPos = append(c.breakPos, []int{})
+	c.emit(code.OpGetBuiltin, builtinIndex("len"))
+	c.loadSymbol(iterSym)
+	c.emit(code.OpCall, 1)
+	c.loadSymbol(counterSym)
+	c.emit(code.OpGreater)
+	exitPos := c.emit(code.OpJumpFalse, 9999)
+	c.loadSymbol(counterSym)
+	c.setSymbol(indexSym)
+	c.loadSymbol(iterSym)
+	c.loadSymbol(counterSym)
+	c.emit(code.OpIndex)
+	c.setSymbol(elemSym)
+	if err := c.Compile(node.Body); err != nil {
+		return err
+	}
+	c.loadSymbol(counterSym)
+	c.emit(code.OpConstant, c.addConstant(&object.Integer{Value: 1}))
+	c.emit(code.OpAdd)
+	c.setSymbol(counterSym)
+	c.emitLoop(loopStart)
+	afterLoop := len(c.currentInstructions())
+	c.replaceOperand(exitPos, afterLoop)
+	for _, bp := range c.breakPos[len(c.breakPos)-1] {
+		c.replaceOperand(bp, afterLoop)
+	}
+	c.loopStarts = c.loopStarts[:len(c.loopStarts)-1]
+	c.breakPos = c.breakPos[:len(c.breakPos)-1]
 	return nil
 }
 
@@ -1094,6 +1227,7 @@ func (c *Compiler) emitLoop(loopStart int) {
 	offset := pos - loopStart + 1
 	c.scopes[c.scopeIndex].instructions[pos+1] = byte(offset >> 8)
 	c.scopes[c.scopeIndex].instructions[pos+2] = byte(offset)
+	c.scopes[c.scopeIndex].lineTracker.Emit(pos, 3, c.scopes[c.scopeIndex].currentLine)
 }
 
 func (c *Compiler) lastInstructionIs(op code.Opcode) bool {
@@ -1135,136 +1269,4 @@ func (c *Compiler) emitCompoundOp(op string) {
 	case ">>=":
 		c.emit(code.OpRShift)
 	}
-}
-
-func NewWithState(s *SymbolTable, constants []object.Object) *Compiler {
-	compiler := New()
-	compiler.symbolTable = s
-	compiler.constants = constants
-	return compiler
-}
-
-func (c *Compiler) compileCompoundIndex(node *ast.CompoundAssignStatement, target *ast.IndexExpression) error {
-	// Step 1: load current value arr[i]
-	if err := c.Compile(target.Left); err != nil {
-		return err
-	}
-	if err := c.Compile(target.Index); err != nil {
-		return err
-	}
-	c.emit(code.OpIndex)
-
-	// Step 2: compile RHS and apply operator
-	if err := c.Compile(node.Value); err != nil {
-		return err
-	}
-	c.emitCompoundOp(node.Operator)
-
-	// Step 3: save result to a temp local
-	resultSym := c.symbolTable.Define("__ci_result__", true)
-	c.setSymbol(resultSym)
-
-	// Step 4: store result back to arr[i]
-	if err := c.Compile(target.Left); err != nil {
-		return err
-	}
-	if err := c.Compile(target.Index); err != nil {
-		return err
-	}
-	c.loadSymbol(resultSym)
-	c.emit(code.OpIndexSet)
-
-	return nil
-}
-
-func (c *Compiler) compileCompoundField(node *ast.CompoundAssignStatement, target *ast.FieldAccessExpression) error {
-	// Step 1: load current value obj.field
-	if err := c.Compile(target.Left); err != nil {
-		return err
-	}
-	nameIdx := c.addConstant(&object.String{Value: target.Field.Value})
-	c.emit(code.OpGetField, nameIdx)
-
-	// Step 2: compile RHS and apply operator
-	if err := c.Compile(node.Value); err != nil {
-		return err
-	}
-	c.emitCompoundOp(node.Operator)
-
-	// Step 3: save result
-	resultSym := c.symbolTable.Define("__cf_result__", true)
-	c.setSymbol(resultSym)
-
-	// Step 4: store result back to obj.field
-	if err := c.Compile(target.Left); err != nil {
-		return err
-	}
-	c.loadSymbol(resultSym)
-	nameIdx2 := c.addConstant(&object.String{Value: target.Field.Value})
-	c.emit(code.OpSetField, nameIdx2)
-
-	return nil
-}
-
-func (c *Compiler) compileForIndex(node *ast.ForIndexStatement) error {
-	iterSym := c.symbolTable.Define("__fi_iter__", true)
-	counterSym := c.symbolTable.Define("__fi_counter__", true)
-	elemSym := c.symbolTable.Define(node.Variable.Value, true)
-	indexSym := c.symbolTable.Define(node.Index.Value, true)
-
-	// __fi_iter__ = iterable
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-	c.setSymbol(iterSym)
-
-	// __fi_counter__ = 0
-	c.emit(code.OpConstant, c.addConstant(&object.Integer{Value: 0}))
-	c.setSymbol(counterSym)
-
-	loopStart := len(c.currentInstructions())
-	c.loopStarts = append(c.loopStarts, loopStart)
-	c.breakPos = append(c.breakPos, []int{})
-
-	// if len(__fi_iter__) <= __fi_counter__ { break }
-	c.emit(code.OpGetBuiltin, builtinIndex("len"))
-	c.loadSymbol(iterSym)
-	c.emit(code.OpCall, 1)
-	c.loadSymbol(counterSym)
-	c.emit(code.OpGreater)
-	exitPos := c.emit(code.OpJumpFalse, 9999)
-
-	// indexVar = __fi_counter__
-	c.loadSymbol(counterSym)
-	c.setSymbol(indexSym)
-
-	// elemVar = __fi_iter__[__fi_counter__]
-	c.loadSymbol(iterSym)
-	c.loadSymbol(counterSym)
-	c.emit(code.OpIndex)
-	c.setSymbol(elemSym)
-
-	// body
-	if err := c.Compile(node.Body); err != nil {
-		return err
-	}
-
-	// __fi_counter__++
-	c.loadSymbol(counterSym)
-	c.emit(code.OpConstant, c.addConstant(&object.Integer{Value: 1}))
-	c.emit(code.OpAdd)
-	c.setSymbol(counterSym)
-
-	c.emitLoop(loopStart)
-	afterLoop := len(c.currentInstructions())
-	c.replaceOperand(exitPos, afterLoop)
-
-	breaks := c.breakPos[len(c.breakPos)-1]
-	for _, bp := range breaks {
-		c.replaceOperand(bp, afterLoop)
-	}
-	c.loopStarts = c.loopStarts[:len(c.loopStarts)-1]
-	c.breakPos = c.breakPos[:len(c.breakPos)-1]
-
-	return nil
 }

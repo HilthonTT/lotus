@@ -187,8 +187,13 @@ func (p *Parser) peekTokenIs(t token.TokenType) bool {
 }
 
 func (p *Parser) peekError(t token.TokenType) {
-	p.errors = append(p.errors, fmt.Sprintf("line %d: expected %s, got %s",
-		p.peekToken.Line, t, p.peekToken.Type))
+	p.errors = append(p.errors, fmt.Sprintf(
+		"line %d, col %d: expected %q but got %q",
+		p.peekToken.Line,
+		p.peekToken.Col,
+		string(t),
+		p.peekToken.Literal,
+	))
 }
 
 func (p *Parser) peekPrecedence() int {
@@ -218,12 +223,22 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 func (p *Parser) ParseProgram() *ast.Program {
 	program := &ast.Program{}
 	program.Statements = []ast.Statement{}
+
 	for p.curToken.Type != token.EOF {
+		prevErrCount := len(p.errors)
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
-		p.nextToken()
+
+		// If new errors appeared during this statement, synchronize
+		// to the next safe statement boundary instead of stopping.
+		if len(p.errors) > prevErrCount {
+			p.synchronize()
+		} else {
+			p.nextToken()
+		}
 	}
 	return program
 }
@@ -589,8 +604,10 @@ func (p *Parser) parseForStatement() ast.Statement {
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
-		p.errors = append(p.errors, fmt.Sprintf("line %d: no prefix parse function for %s",
-			p.curToken.Line, p.curToken.Type))
+		p.errors = append(p.errors, fmt.Sprintf(
+			"line %d, col %d: unexpected token %q",
+			p.curToken.Line, p.curToken.Col, p.curToken.Literal,
+		))
 		return nil
 	}
 

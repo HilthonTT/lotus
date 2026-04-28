@@ -47,6 +47,7 @@ type VM struct {
 	loader        ModuleLoader
 	moduleCache   map[string]*object.Module
 	catchStack    []catchEntry
+	filePath      string
 }
 
 // New initializes and returns a pointer to a VM.
@@ -220,7 +221,7 @@ func (vm *VM) Run() error {
 		case code.OpAdd, code.OpSub, code.OpMul, code.OpDiv, code.OpMod:
 			if err := vm.executeBinaryOperation(op); err != nil {
 				if !vm.redirectToCatch(err) {
-					return err
+					return vm.runtimeError(err)
 				}
 			}
 
@@ -417,7 +418,7 @@ func (vm *VM) Run() error {
 			vm.currentFrame().ip++
 
 			if err := vm.executeCall(int(numArgs)); err != nil {
-				return err
+				return vm.runtimeError(err)
 			}
 
 		// OpReturn and OpReturnNil both respect initInstance so that
@@ -629,7 +630,7 @@ func (vm *VM) Run() error {
 			}
 			throwErr := fmt.Errorf("%s", msg)
 			if !vm.redirectToCatch(throwErr) {
-				return throwErr
+				return vm.runtimeError(throwErr)
 			}
 
 		case code.OpTryBegin:
@@ -713,7 +714,7 @@ func (vm *VM) Run() error {
 
 			if err := vm.executeCall(len(flatArgs)); err != nil {
 				if !vm.redirectToCatch(err) {
-					return err
+					return vm.runtimeError(err)
 				}
 			}
 

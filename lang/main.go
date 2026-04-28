@@ -21,15 +21,16 @@ import (
 )
 
 func main() {
-	engine := flag.String("engine", "vm", `Execution engine: "vm" (bytecode) or "eval" (tree-walking)`)
+	engine := flag.String("engine", "vm", `Execution engine: "vm" or "eval"`)
 	console := flag.Bool("console", false, "Start an interactive REPL session")
-	dis := flag.Bool("dis", false, "Disassemble a Lotus file instead of running it")
-	annotated := flag.Bool("annotated", false, "Use annotated disassembly output (requires --dis)")
-	help := flag.Bool("help", false, "Show this help message")
+	dis := flag.Bool("dis", false, "Disassemble a .lotus file")
+	annotated := flag.Bool("annotated", false, "Annotated disassembly (requires --dis)")
+	help := flag.Bool("help", false, "Show help")
 	ver := flag.Bool("version", false, "Print version information")
 	playground := flag.Bool("playground", false, "Start the web playground")
 	playgroundAddr := flag.String("playground-addr", ":3000", "Playground server address")
-	buildOut := flag.String("build", "", "Output path for compiled executable (enables build mode)")
+	buildOut := flag.String("build", "", "Output path for compiled executable")
+	compile := flag.Bool("compile", false, "Compile .lotus to .lotusbc without running")
 
 	flag.Usage = printHelp
 	flag.Parse()
@@ -37,59 +38,59 @@ func main() {
 	switch {
 	case *help:
 		printHelp()
+
 	case *ver:
 		fmt.Println(version.GetVersionString())
+
 	case *console:
 		if err := validateEngine(*engine); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fatal(err.Error())
 		}
 		repl.Start(os.Stdin, os.Stdout, engine)
+
+	case *compile:
+		// lotus --compile file.lotus  →  writes file.lotusbc
+		if len(flag.Args()) != 1 {
+			fatal("usage: lotus --compile <file.lotus>")
+		}
+		compileToBytecode(flag.Args()[0])
+
 	case *dis:
 		if len(flag.Args()) != 1 {
-			fmt.Fprintln(os.Stderr, "error: expected a file path\nUsage: lotus --dis [--annotated] <file>")
-			os.Exit(1)
+			fatal("usage: lotus --dis [--annotated] <file>")
 		}
 		disassembleFile(flag.Args()[0], *annotated)
+
 	case *playground:
 		if err := validateEngine(*engine); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fatal(err.Error())
 		}
 		startPlayground(*playgroundAddr, *engine)
-	case *buildOut != "":
-		src := ""
-		output := *buildOut
 
+	case *buildOut != "":
+		src, output := *buildOut, *buildOut
 		if strings.HasSuffix(output, ".lotus") {
-			// lotus --build file.lotus  (no separate output arg)
-			src = output
 			output = ""
 		} else {
-			// lotus --build myapp.exe file.lotus
 			if len(flag.Args()) != 1 {
-				fmt.Fprintln(os.Stderr, "error: expected a file path\nUsage: lotus --build [output.exe] <file.lotus>")
-				os.Exit(1)
+				fatal("usage: lotus --build [output.exe] <file.lotus>")
 			}
 			src = flag.Args()[0]
 		}
-
 		if err := validateEngine(*engine); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fatal(err.Error())
 		}
 		if err := executable.BuildExecutable(src, output, *engine); err != nil {
 			fmt.Fprintln(os.Stderr, "build error:", err)
 			os.Exit(1)
 		}
+
 	default:
 		if err := validateEngine(*engine); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fatal(err.Error())
 		}
 		if len(flag.Args()) != 1 {
-			fmt.Fprintln(os.Stderr, "error: expected a file path\nUsage: lotus [options] <file>")
-			os.Exit(1)
+			fatal("usage: lotus [options] <file>")
 		}
 		runFile(flag.Args()[0], *engine)
 	}
@@ -97,21 +98,42 @@ func main() {
 
 func validateEngine(engine string) error {
 	if engine != "vm" && engine != "eval" {
-		return fmt.Errorf("error: unknown engine %q — must be \"vm\" or \"eval\"", engine)
+		return fmt.Errorf("unknown engine %q — must be \"vm\" or \"eval\"", engine)
 	}
 	return nil
 }
 
+func fatal(msg string) {
+	fmt.Fprintln(os.Stderr, "error:", msg)
+	os.Exit(1)
+}
+
+// runFile runs a .lotus or a pre-compiled .lotusbc file.
 func runFile(filePath, engine string) {
-	program := mustParse(filePath)
+	ext := filepath.Ext(filePath)
 
 	absPath, _ := filepath.Abs(filePath)
 
 	var result object.Object
-	if engine == "vm" {
-		result = compileBytecodeAndRun(program, absPath)
+	if ext == ".lotusbc" {
+		// Run pre-compiled bytecode directly.
+		bc, err := compiler.ReadBytecode(filePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		result = runBytecode(bc, absPath)
 	} else {
-		result = evaluateAst(program)
+		// Parse + compile + run.
+		if ext != ".lotus" {
+			fatal(fmt.Sprintf("%q is not a .lotus file", filePath))
+		}
+		program := mustParse(filePath)
+		if engine == "vm" {
+			result = compileBytecodeAndRun(program, absPath)
+		} else {
+			result = evaluateAst(program)
+		}
 	}
 
 	if result != nil && result.Type() != object.NIL_OBJ {
@@ -119,27 +141,53 @@ func runFile(filePath, engine string) {
 	}
 }
 
-func disassembleFile(filePath string, annotated bool) {
+// compileToBytecode compiles a .lotus file and writes a .lotusbc file.
+func compileToBytecode(filePath string) {
+	if filepath.Ext(filePath) != ".lotus" {
+		fatal(fmt.Sprintf("%q is not a .lotus file", filePath))
+	}
 	program := mustParse(filePath)
-
 	comp := compiler.New()
 	if err := comp.Compile(program); err != nil {
-		fmt.Fprintf(os.Stderr, "compiler error: %s\n", err)
+		fmt.Fprintln(os.Stderr, "compiler error:", err)
 		os.Exit(1)
 	}
+	outPath := strings.TrimSuffix(filePath, ".lotus") + ".lotusbc"
+	if err := compiler.WriteBytecode(comp.Bytecode(), outPath); err != nil {
+		fmt.Fprintln(os.Stderr, "write error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("compiled: %s → %s\n", filePath, outPath)
+}
 
-	bytecode := comp.Bytecode()
+func disassembleFile(filePath string, annotated bool) {
+	var bc *compiler.Bytecode
 
-	// Print top-level instructions.
-	fmt.Println("=== main ===")
-	if annotated {
-		fmt.Print(code.DisassembleAnnotated(bytecode.Instructions))
+	if filepath.Ext(filePath) == ".lotusbc" {
+		var err error
+		bc, err = compiler.ReadBytecode(filePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 	} else {
-		fmt.Print(code.Disassemble(bytecode.Instructions))
+		program := mustParse(filePath)
+		comp := compiler.New()
+		if err := comp.Compile(program); err != nil {
+			fmt.Fprintln(os.Stderr, "compiler error:", err)
+			os.Exit(1)
+		}
+		bc = comp.Bytecode()
 	}
 
-	// Print each compiled function's instructions.
-	for i, obj := range bytecode.Constants {
+	fmt.Println("=== main ===")
+	if annotated {
+		fmt.Print(code.DisassembleAnnotated(bc.Instructions))
+	} else {
+		fmt.Print(code.Disassemble(bc.Instructions))
+	}
+
+	for i, obj := range bc.Constants {
 		fn, ok := obj.(*object.CompiledFunction)
 		if !ok {
 			continue
@@ -163,16 +211,15 @@ func mustParse(filePath string) *ast.Program {
 		os.Exit(1)
 	}
 	fmt.Println(filePath)
-
 	contents, err := os.ReadFile(filePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: could not read file %q: %s\n", filePath, err)
+		fmt.Fprintf(os.Stderr, "error: could not read %q: %s\n", filePath, err)
 		os.Exit(1)
 	}
 	l := lexer.New(string(contents))
 	p := parser.New(l)
 	program := p.ParseProgram()
-	if errs := p.Errors(); len(errs) != 0 {
+	if errs := p.Errors(); len(errs) > 0 {
 		fmt.Fprintln(os.Stderr, "parse errors:")
 		for _, e := range errs {
 			fmt.Fprintf(os.Stderr, "\t%s\n", e)
@@ -187,21 +234,33 @@ func evaluateAst(program *ast.Program) object.Object {
 	return evaluator.Eval(program, env)
 }
 
+// runBytecode runs a pre-loaded Bytecode (from .lotusbc) through the VM.
+func runBytecode(bc *compiler.Bytecode, filePath string) object.Object {
+	absPath, _ := filepath.Abs(filePath)
+	loader := makeModuleLoaderFrom(absPath)
+	machine := vm.NewWithLoader(bc, loader)
+	machine.SetFilePath(absPath)
+	if err := machine.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "vm error:", err)
+		os.Exit(1)
+	}
+	return machine.LastPoppedStackElement()
+}
+
 func compileBytecodeAndRun(program *ast.Program, filePath string) object.Object {
 	comp := compiler.New()
 	if err := comp.Compile(program); err != nil {
-		fmt.Fprintf(os.Stderr, "compiler error: %s\n", err)
+		fmt.Fprintln(os.Stderr, "compiler error:", err)
 		os.Exit(1)
 	}
-
 	absPath, _ := filepath.Abs(filePath)
 	loader := makeModuleLoaderFrom(absPath)
 	machine := vm.NewWithLoader(comp.Bytecode(), loader)
+	machine.SetFilePath(absPath) // ← enables stack traces
 	if err := machine.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "vm error: %s\n", err)
+		fmt.Fprintln(os.Stderr, "vm error:", err)
 		os.Exit(1)
 	}
-
 	return machine.LastPoppedStackElement()
 }
 
@@ -214,34 +273,39 @@ func makeModuleLoaderFrom(entryPath string) vm.ModuleLoader {
 			path = filepath.Join(filepath.Dir(importerPath), path)
 		}
 		path = filepath.Clean(path)
-
 		if mod, ok := cache[path]; ok {
 			return mod, nil
 		}
 
-		program := mustParse(path)
-
-		comp := compiler.New()
-		if err := comp.Compile(program); err != nil {
-			return nil, fmt.Errorf("compile error in %q: %w", path, err)
+		// Support importing pre-compiled .lotusbc modules too.
+		var bc *compiler.Bytecode
+		if filepath.Ext(path) == ".lotusbc" {
+			var err error
+			bc, err = compiler.ReadBytecode(path)
+			if err != nil {
+				return nil, fmt.Errorf("load %q: %w", path, err)
+			}
+		} else {
+			program := mustParse(path)
+			comp := compiler.New()
+			if err := comp.Compile(program); err != nil {
+				return nil, fmt.Errorf("compile %q: %w", path, err)
+			}
+			bc = comp.Bytecode()
 		}
 
-		bytecode := comp.Bytecode()
-		machine := vm.NewWithLoader(bytecode, func(childPath string) (*object.Module, error) {
+		machine := vm.NewWithLoader(bc, func(childPath string) (*object.Module, error) {
 			return load(path, childPath)
 		})
+		machine.SetFilePath(path)
 		if err := machine.Run(); err != nil {
 			return nil, fmt.Errorf("runtime error in %q: %w", path, err)
 		}
 
-		mod := &object.Module{
-			Path:    path,
-			Exports: make(map[string]object.Object),
+		mod := &object.Module{Path: path, Exports: make(map[string]object.Object)}
+		for name, idx := range bc.ExportedSymbols {
+			mod.Exports[name] = machine.GetGlobal(idx)
 		}
-		for name, globalIdx := range bytecode.ExportedSymbols {
-			mod.Exports[name] = machine.GetGlobal(globalIdx)
-		}
-
 		cache[path] = mod
 		return mod, nil
 	}
@@ -255,20 +319,20 @@ func printHelp() {
 	fmt.Print(repl.Logo)
 	fmt.Printf("  Version: %s\n\n", version.Version)
 	fmt.Println("Usage:")
-	fmt.Println("  lotus [options] <file>          Run a Lotus source file")
-	fmt.Println("  lotus --dis <file>              Disassemble a Lotus source file")
-	fmt.Println("  lotus --dis --annotated <file>  Disassemble with inline comments")
-	fmt.Println("  lotus --console                 Start the interactive REPL")
+	fmt.Println("  lotus <file.lotus>               Run a source file")
+	fmt.Println("  lotus <file.lotusbc>             Run a pre-compiled file")
+	fmt.Println("  lotus --compile <file.lotus>     Compile to .lotusbc")
+	fmt.Println("  lotus --dis <file>               Disassemble")
+	fmt.Println("  lotus --dis --annotated <file>   Disassemble with comments")
+	fmt.Println("  lotus --console                  Interactive REPL")
 	fmt.Println()
 	fmt.Println("Options:")
 	flag.PrintDefaults()
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  lotus program.lotus")
-	fmt.Println("  lotus --engine eval program.lotus")
-	fmt.Println("  lotus --dis program.lotus")
+	fmt.Println("  lotus --compile program.lotus && lotus program.lotusbc")
 	fmt.Println("  lotus --dis --annotated program.lotus")
 	fmt.Println("  lotus --console")
-	fmt.Println("  lotus --console --engine eval")
 	fmt.Println("  lotus --version")
 }

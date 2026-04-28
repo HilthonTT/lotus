@@ -12,7 +12,10 @@ type Result struct {
 	ErrMsg string // non-empty when Ok == false
 }
 
-func (r *Result) Type() ObjectType { return RESULT_OBJ }
+func (r *Result) Type() ObjectType {
+	return RESULT_OBJ
+}
+
 func (r *Result) Inspect() string {
 	if r.Ok {
 		if r.Value != nil {
